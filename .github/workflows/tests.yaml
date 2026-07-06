@@ -1,0 +1,59 @@
+name: Tests
+
+# Unit tests run on every PR, including fork PRs from residents.
+# SECURITY: this workflow must NEVER reference `secrets.*` — fork PRs execute
+# arbitrary contributor code. Tests that need API keys live in
+# integration-tests.yaml, which is maintainer-gated.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0 # Needed to get PR diff
+
+      - name: Detect changed environments
+        id: changed-envs
+        if: github.event_name == 'pull_request'
+        uses: tj-actions/changed-files@v47
+        with:
+          path: environments
+          dir_names: true
+          dir_names_max_depth: 1
+          separator: ","
+
+      - name: Setup Git LFS
+        run: |
+          git lfs install
+          git lfs pull
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run tests
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            export CHANGED_ENVS="${{ steps.changed-envs.outputs.all_changed_files || 'none' }}"
+            echo "CHANGED_ENVS: $CHANGED_ENVS"
+          fi
+          uv run pytest -n auto tests -v
