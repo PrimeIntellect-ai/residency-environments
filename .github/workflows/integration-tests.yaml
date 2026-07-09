@@ -1,23 +1,21 @@
 name: Integration tests
 
-# Smoke-evals that need API keys. Maintainer-gated two ways:
-#   1. Only runs when a maintainer adds the `safe-to-test` label (the label is
-#      stripped on every new push by remove-safe-to-test-label.yaml, so new
-#      commits always need re-approval).
-#   2. The job uses the `integration` GitHub Environment, which should be
-#      configured with required reviewers, so secrets are only exposed after an
-#      explicit human approval.
-# Can also be run manually against a PR via workflow_dispatch.
+# Smoke-evals that need API keys (real model rollouts).
+#
+# Trigger: add the `safe-to-test` label to a PR (remove + re-add to re-run
+# after new commits), or run manually via workflow_dispatch.
+#
+# SECURITY: all secrets live on the `integration` GitHub Environment, which has
+# required reviewers — a maintainer must approve every run before secrets are
+# injected, regardless of who triggered the run or what the workflow file on
+# the PR branch says. Never move these secrets to repo level: contributors have
+# write access, and repo-level secrets would be exposed to any workflow edit on
+# a branch.
 
 on:
-  pull_request_target:
+  pull_request:
     types: [labeled]
   workflow_dispatch:
-    inputs:
-      pr_number:
-        description: "PR number to test (leave empty to test main)"
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -35,27 +33,15 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
-      - name: Resolve ref to test
-        id: ref
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
-            echo "ref=refs/pull/${{ github.event.pull_request.number }}/merge" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ inputs.pr_number }}" ]; then
-            echo "ref=refs/pull/${{ inputs.pr_number }}/merge" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=main" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Checkout code under test
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.ref.outputs.ref }}
           submodules: true
-          fetch-depth: 0
+          fetch-depth: 0 # Needed to get PR diff
 
       - name: Detect changed environments
         id: changed-envs
-        if: github.event_name == 'pull_request_target'
+        if: github.event_name == 'pull_request'
         uses: tj-actions/changed-files@v47
         with:
           path: environments
@@ -79,7 +65,7 @@ jobs:
 
       - name: Run integration tests
         run: |
-          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             export CHANGED_ENVS="${{ steps.changed-envs.outputs.all_changed_files || 'none' }}"
             echo "CHANGED_ENVS: $CHANGED_ENVS"
           fi

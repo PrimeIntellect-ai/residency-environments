@@ -1,47 +1,45 @@
 # Maintainer notes: repo security model
 
-This repo is public but contributors (RL residents) are semi-trusted outside
-collaborators. The setup enforces:
+This repo is **private** (pre-release residency work) with semi-trusted outside
+collaborators (RL residents). The setup enforces:
 
 ## Access
 
-- Residents: outside collaborators with **triage** role. They can open
-  issues/PRs (satisfies the interaction limit) but cannot push branches or merge.
-- Maintainers: company members with **write/maintain**, in the
-  `@PrimeIntellect-ai/residency-maintainers` team (referenced by CODEOWNERS).
-- Interaction limit `collaborators_only` blocks everyone else from opening
-  issues/PRs; it expires after 6 months, so `interaction-limits.yaml` renews it
-  monthly (needs the `ADMIN_TOKEN` secret — a fine-grained PAT with
-  Administration read/write on this repo).
+- Residents: outside collaborators with **write** role. They push branches and
+  open PRs directly; they cannot merge to `main` (code-owner review required)
+  and cannot reach integration secrets (environment-gated).
+- Maintainers: company members in `@PrimeIntellect-ai/residency-maintainers`
+  (maintain role; referenced by CODEOWNERS).
+- Forking is disabled; visibility changes are admin-only.
 
-## Branch protection (ruleset on `main`)
+## Branch protection (ruleset `protect-main`)
 
 - Require PR, >=1 approval, dismiss stale approvals, require code owner review.
 - Required status checks: `Ruff`, `Unit tests`.
-- Block force pushes and deletions.
+- Block force pushes and deletions. **No bypass actors** — nobody pushes to
+  `main` directly, admins included.
 
 ## CI trust boundaries
 
-- `style.yaml` / `tests.yaml`: run on every PR (incl. forks). MUST never
-  reference `secrets.*` — fork PRs execute contributor code.
-- `integration-tests.yaml`: needs secrets. Gated by (a) the `safe-to-test`
-  label, which only write-access users can add, and (b) the `integration`
-  GitHub Environment, which should have **required reviewers** configured.
-  `remove-safe-to-test-label.yaml` strips the label on every new push so
-  approval never carries over to unseen code.
-- Actions settings should be: fork PR workflows require approval (at least for
-  first-time contributors), default workflow permissions read-only, "Actions
-  can create/approve PRs" disabled.
+- `style.yaml` / `tests.yaml`: run on every PR with no maintainer gate. MUST
+  never reference `secrets.*`.
+- `integration-tests.yaml`: needs secrets. All its secrets live on the
+  `integration` GitHub Environment with **required reviewers**, so every run
+  waits for a maintainer's approval before secrets are injected — even if a
+  contributor edits the workflow on their branch. Never move these secrets to
+  repo level: with write-access contributors, repo-level secrets are readable
+  by any workflow edit on any branch.
+- Actions settings: default workflow permissions read-only, "Actions can
+  create/approve PRs" disabled.
 
 ## Review bots
 
-Bugbot / Macroscope are installed in manual-trigger mode only; maintainers
+Bugbot / Macroscope are configured in manual-trigger mode only; maintainers
 invoke them explicitly. Never configure them to auto-run on every PR.
 
 ## When reviewing resident PRs
 
-Treat workflow-file changes (`.github/workflows/`) with extra care — a PR that
-edits `integration-tests.yaml` or `remove-safe-to-test-label.yaml` could try to
-weaken the gates. `pull_request_target` workflows run the *base* branch's
-workflow definition, which protects the label-gate itself, but review changes
-to these files carefully before merging.
+Treat workflow-file changes (`.github/workflows/`) with extra care — the
+environment gate protects secrets, but a workflow edit could still waste
+runner time or attempt privilege escalation. Also remember residents can push
+to *any* non-main branch, so don't treat branch names as authorization.
