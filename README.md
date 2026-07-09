@@ -22,6 +22,6 @@ uv run pre-commit install
 
 ## Contributing
 
-The repo is public but interaction is limited to collaborators (residents and
-Prime Intellect maintainers). Residents contribute via fork → branch → PR; see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+The repo is private until public release of the work in it. Residents have
+write access and contribute via branch → PR; `main` only moves through
+reviewed PRs. See [CONTRIBUTING.md](CONTRIBUTING.md).

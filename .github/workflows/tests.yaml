@@ -1,9 +1,10 @@
 name: Tests
 
-# Unit tests run on every PR, including fork PRs from residents.
-# SECURITY: this workflow must NEVER reference `secrets.*` — fork PRs execute
-# arbitrary contributor code. Tests that need API keys live in
-# integration-tests.yaml, which is maintainer-gated.
+# Unit tests run automatically on every PR.
+# SECURITY: this workflow must NEVER reference `secrets.*` — it runs
+# contributor code without any maintainer gate. Tests that need API keys live
+# in integration-tests.yaml, whose secrets sit behind the `integration`
+# environment's required-reviewer approval.
 
 on:
   push:
