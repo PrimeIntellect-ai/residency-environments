@@ -4,7 +4,7 @@
 
 ## How to try it
 
-<!-- e.g. `uv run vf-eval <env-name> -n1 -r1 -d -v` or the v1 `eval` command -->
+<!-- e.g. `uv run eval --taskset.id <env-name>_v1 -n 1 -r 2` -->
 
 ## Checklist
 
