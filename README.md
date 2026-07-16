@@ -3,9 +3,8 @@
 RL environments built by the Prime Intellect **RL Residency**.
 
 This repo mirrors the structure of `research-environments`: each environment
-lives in `environments/<env_name>/` as an installable package. Classic (v0)
-verifiers environments expose `load_environment(...)`; `*_v1` packages are
-verifiers-v1 tasksets run via the `eval` CLI.
+lives in `environments/<env_name>_v1/` as an installable Verifiers v1 taskset
+run via the `eval` CLI.
 
 ## Setup
 
@@ -17,7 +16,7 @@ uv run pre-commit install
 ## Repo layout
 
 - `environments/` — one directory per environment (installable package)
-- `tests/` — harness tests that install, import, load, and smoke-eval every env
+- `tests/` — harness tests that install and smoke-eval every v1 taskset
 - `scripts/` — setup helpers
 
 ## Contributing

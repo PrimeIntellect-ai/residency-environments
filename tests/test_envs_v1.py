@@ -1,8 +1,7 @@
 """Smoke-eval every v1 taskset in `environments/` through the `eval` CLI.
 
-The v0 counterpart (`tests/test_envs.py`) covers v0 envs (`vf.load_environment` + `vf-eval`);
-here each `*_v1` taskset is installed into a fresh venv (its `verifiers` dep provides the
-`eval` CLI) and run for one short, capped rollout via `eval --taskset.id`. A broken taskset
+Each `*_v1` taskset is installed into a fresh venv (its `verifiers` dependency provides
+the `eval` CLI) and run for one short, capped rollout via `eval --taskset.id`. A broken taskset
 fails CI. The eval step needs a model API key, so in CI without secrets (fork PRs) only the
 install is checked and the rollout runs in the maintainer-gated integration-tests workflow.
 

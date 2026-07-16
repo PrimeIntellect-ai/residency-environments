@@ -51,18 +51,15 @@ Write tests as plain functions with pytest fixtures. Don't use class-based tests
 Use this guidance when contributing to the `residency-environments` repository itself.
 
 - Always use `uv` to run Python commands
-- During development, install environments (`/environments`) from the project's root directory using editable, local installs as `uv pip install -e ./environments/<env-name>`. DO NOT install from within the environment directories.
-- To check an environment implementation, use `uv run vf-eval`. Usually, it is useful to start by running a single rollout with verbose logs. Once the environment runs smoothly, generate more samples, save them, and analyze the results.
+- During development, install environments (`/environments`) from the project's root directory using editable, local installs as `uv pip install -e ./environments/<env-name>_v1`. DO NOT install from within the environment directories.
+- Environments must use the Verifiers v1 API and have names ending in `_v1`.
+- To check an environment implementation, use the v1 `eval` CLI. Start with a single example and two rollouts so tasksets using group rewards can compare outputs.
 ```bash
-# generate a single rollout in debug mode
-uv run vf-eval --env <env-name> -d -v -n1 -r1
-
-# generate multiple rollouts and save them
-uv run vf-eval --env <env-name> -n5 -r3 -s
+uv run eval --taskset.id <env-name>_v1 -n 1 -r 2 --max-turns 4
 ```
 - After comprehensive changes, check linting and styling for the environment you modified
 ```bash
-uv run ruff check ./environments/<env-name>
-uv run ruff format --check /environments/<env-name>
+uv run ruff check ./environments/<env-name>_v1
+uv run ruff format --check ./environments/<env-name>_v1
 ```
 - Always keep the environment's README up-to-date with any relevant changes.
