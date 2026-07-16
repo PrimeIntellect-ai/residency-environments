@@ -6,6 +6,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: style-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ruff:
     name: Ruff
@@ -14,5 +21,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Run ruff
+      - name: Lint
         uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.15.20"
+          args: "check"
+      - name: Check formatting
+        uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.15.20"
+          args: "format --check"

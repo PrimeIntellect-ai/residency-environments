@@ -23,3 +23,6 @@ ignore = ["F722", "F821"] # Need to ignore for jaxtyping (https://docs.kidger.si
 
 [tool.ruff]
 line-length = 120
+
+[tool.pytest.ini_options]
+markers = ["integration: requires approved integration credentials"]

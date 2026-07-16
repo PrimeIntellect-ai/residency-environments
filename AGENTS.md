@@ -43,7 +43,7 @@ Write tests as plain functions with pytest fixtures. Don't use class-based tests
 
 ## GitHub
 
-- **Draft PRs**: always create PRs as drafts (`gh pr create --draft`) to avoid triggering CI unnecessarily.
+- **Draft PRs**: always create PRs as drafts (`gh pr create --draft`) so work-in-progress is clear; CI still runs on draft updates.
 - **Pull requests**: do not include a "test plan" section in PR descriptions unless you actually ran tests to verify the changes or the user explicitly asked for one.
 
 ## Repository Development Notes
@@ -51,15 +51,15 @@ Write tests as plain functions with pytest fixtures. Don't use class-based tests
 Use this guidance when contributing to the `residency-environments` repository itself.
 
 - Always use `uv` to run Python commands
-- During development, install environments (`/environments`) from the project's root directory using editable, local installs as `uv pip install -e ./environments/<env-name>_v1`. DO NOT install from within the environment directories.
-- Environments must use the Verifiers v1 API and have names ending in `_v1`.
+- During development, install environments (`/environments`) from the project's root directory using editable, local installs as `uv pip install -e ./environments/<env-name>`. DO NOT install from within the environment directories.
+- Every directory under `environments/` is a Verifiers v1 environment; no naming suffix is required.
 - To check an environment implementation, use the v1 `eval` CLI. Start with a single example and two rollouts so tasksets using group rewards can compare outputs.
 ```bash
-uv run eval --taskset.id <env-name>_v1 -n 1 -r 2 --max-turns 4
+uv run eval --taskset.id <env-name> -n 1 -r 2 --max-turns 4
 ```
 - After comprehensive changes, check linting and styling for the environment you modified
 ```bash
-uv run ruff check ./environments/<env-name>_v1
-uv run ruff format --check ./environments/<env-name>_v1
+uv run ruff check ./environments/<env-name>
+uv run ruff format --check ./environments/<env-name>
 ```
 - Always keep the environment's README up-to-date with any relevant changes.

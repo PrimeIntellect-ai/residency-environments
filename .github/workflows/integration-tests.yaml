@@ -1,53 +1,58 @@
 name: Integration tests
 
-# Smoke-evals that need API keys (real model rollouts).
-#
-# Trigger: add the `safe-to-test` label to a PR (remove + re-add to re-run
-# after new commits), or run manually via workflow_dispatch.
-#
-# SECURITY: all secrets live on the `integration` GitHub Environment, which has
-# required reviewers — a maintainer must approve every run before secrets are
-# injected, regardless of who triggered the run or what the workflow file on
-# the PR branch says. Never move these secrets to repo level: contributors have
-# write access, and repo-level secrets would be exposed to any workflow edit on
-# a branch.
+# Every PR head is classified automatically. Environment changes wait for approval
+# on the protected `integration` Environment, then run real model rollouts.
 
 on:
   pull_request:
-    types: [labeled]
-  workflow_dispatch:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
+concurrency:
+  group: integration-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  integration:
-    name: Integration tests
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'safe-to-test'
+  changes:
+    name: Detect environment changes
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    environment: integration
-    env:
-      PRIME_API_KEY: ${{ secrets.PRIME_API_KEY }}
-      PRIME_TEAM_ID: ${{ secrets.PRIME_TEAM_ID }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    outputs:
+      environments: ${{ steps.changed-envs.outputs.all_modified_files }}
+      changed: ${{ steps.changed-envs.outputs.any_modified }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: true
-          fetch-depth: 0 # Needed to get PR diff
-
+          fetch-depth: 0
       - name: Detect changed environments
         id: changed-envs
-        if: github.event_name == 'pull_request'
         uses: tj-actions/changed-files@v47
         with:
           path: environments
           dir_names: true
           dir_names_max_depth: 1
           separator: ","
+
+  integration:
+    name: Run environment integration tests
+    needs: changes
+    if: needs.changes.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: integration
+    env:
+      PRIME_API_KEY: ${{ secrets.PRIME_API_KEY }}
+      PRIME_TEAM_ID: ${{ secrets.PRIME_TEAM_ID }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      CHANGED_ENVS: ${{ needs.changes.outputs.environments }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
 
       - name: Setup Git LFS
         run: |
@@ -64,9 +69,23 @@ jobs:
         run: uv sync --locked
 
       - name: Run integration tests
+        run: uv run pytest -n auto tests -m integration -v
+
+  gate:
+    name: Integration gate
+    if: always()
+    needs: [changes, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check integration result
+        env:
+          CHANGED: ${{ needs.changes.outputs.changed }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            export CHANGED_ENVS="${{ steps.changed-envs.outputs.all_changed_files || 'none' }}"
-            echo "CHANGED_ENVS: $CHANGED_ENVS"
+          test "$CHANGES_RESULT" = success
+          if [ "$CHANGED" = true ]; then
+            test "$INTEGRATION_RESULT" = success
+          else
+            test "$INTEGRATION_RESULT" = skipped
           fi
-          uv run pytest -n auto tests -v
