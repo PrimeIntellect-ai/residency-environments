@@ -3,7 +3,7 @@
 - Residents are outside collaborators with **write** access; company maintainers
   are in `@PrimeIntellect-ai/residency-maintainers`.
 - `main` requires a PR, one company CODEOWNER approval, Ruff, unit tests, and
-  the required integration workflow. There are no bypass actors.
+  the required integration gate. There are no bypass actors.
 - Secretless checks run on every PR update. Bugbot and Macroscope run
   automatically.
 - Environment changes wait for approval on the `integration` GitHub Environment.
