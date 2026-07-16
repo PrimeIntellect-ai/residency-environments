@@ -1,13 +1,17 @@
 ## What
 
-<!-- Which environment(s) does this add or change, and why? -->
+<!-- Which environment does this add or change, and why? -->
 
 ## How to try it
 
-<!-- e.g. `uv run eval --taskset.id <env-name>_v1 -n 1 -r 2` -->
+<!-- Include the taskset ID, runtime requirements, and a short eval command. -->
+
+## Data and scoring
+
+<!-- Dataset source/license, reward design, and known reward-hacking risks. -->
 
 ## Checklist
 
 - [ ] `uv run ruff check . && uv run ruff format --check .` passes
-- [ ] `uv run pytest -n auto tests -v` passes locally
-- [ ] Environment has a real `pyproject.toml` (name/version/description/keywords) and `README.md`
+- [ ] `uv run pytest -n auto tests -m "not integration" -v` passes locally
+- [ ] Environment has a `pyproject.toml` and `README.md`
