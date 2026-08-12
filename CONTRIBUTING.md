@@ -1,7 +1,10 @@
 # Contributing
 
+This repo is public; contributions come from the Prime Intellect RL Residency.
+
 Residents have write access and contribute through branches and pull requests.
-`main` only moves through reviewed PRs.
+`main` only moves through reviewed PRs. Note that the repo is public, so
+anything you push to any branch is publicly visible.
 
 1. Branch from `main`: `feat/<env-name>`, `fix/<...>`, or `chore/<...>`.
 2. Add or update an environment under `environments/<env-name>/`.
