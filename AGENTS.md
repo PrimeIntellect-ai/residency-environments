@@ -53,6 +53,7 @@ Use this guidance when contributing to the `residency-environments` repository i
 - Always use `uv` to run Python commands
 - During development, install environments (`/environments`) from the project's root directory using editable, local installs as `uv pip install -e ./environments/<env-name>`. DO NOT install from within the environment directories.
 - Every directory under `environments/` is a Verifiers v1 environment; no naming suffix is required.
+- For synthetically generated environments, the data generation and validation code lives in a matching `generators/<env-name>/` directory (see `generators/README.md`).
 - To check an environment implementation, use the v1 `eval` CLI. Start with a single example and two rollouts so tasksets using group rewards can compare outputs.
 ```bash
 uv run eval --taskset.id <env-name> -n 1 -r 2 --max-turns 4
