@@ -55,6 +55,7 @@ Use this guidance when contributing to the `residency-environments` repository i
 - During development, install environments (`/environments`) from the project's root directory using editable, local installs as `uv pip install -e ./environments/<env-name>`. DO NOT install from within the environment directories.
 - Every directory under `environments/` is a Verifiers v1 environment; no naming suffix is required.
 - For synthetically generated environments, the data generation and validation code lives in a matching `generators/<env-name>/` directory (see `generators/README.md`).
+- Every environment must declare its full-eval convention in `pyproject.toml` under `[tool.verifiers.eval]` (`num_examples`, `rollouts_per_example`); automated eval runs read it when no sample count is given. Infinite tasksets fall back to 50 examples.
 - To check an environment implementation, use the v1 `eval` CLI. Start with a single example and two rollouts so tasksets using group rewards can compare outputs.
 
 ```bash
