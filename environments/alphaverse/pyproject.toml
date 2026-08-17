@@ -1,0 +1,33 @@
+[build-system]
+requires = ["uv_build>=0.9.26,<0.13.0"]
+build-backend = "uv_build"
+
+[project]
+name = "alphaverse"
+version = "0.1.0"
+description = "A deterministic limit-order-market environment for long-horizon coding-agent evaluation"
+readme = "README.md"
+requires-python = "~=3.12.0"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "pydantic>=2.11,<3",
+    "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@02cc940",
+]
+
+[tool.verifiers.eval]
+num_examples = 5
+rollouts_per_example = 1
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.uv.build-backend]
+module-name = [
+    "alphaverse",
+    "alphaverse_adaptive_env",
+    "alphaverse_claude_code_harness",
+    "alphaverse_codex_harness",
+    "alphaverse_eval_harness",
+]
