@@ -5,7 +5,8 @@
 - **Minimal try/except**: let errors propagate — silent failures hide bugs. Only catch exceptions for intentional fault tolerance (retries, robustness).
 - **Targeted comments**: don't explain your work process or reference old code. Use targeted comments sparingly to clarify ambiguous logic.
 - **Zen of Python**: remember the Zen of Python when writing code.
-```
+
+```text
 Beautiful is better than ugly.
 Explicit is better than implicit.
 Simple is better than complex.
@@ -55,14 +56,18 @@ Use this guidance when contributing to the `residency-environments` repository i
 - Every directory under `environments/` is a Verifiers v1 environment; no naming suffix is required.
 - For synthetically generated environments, the data generation and validation code lives in a matching `generators/<env-name>/` directory (see `generators/README.md`).
 - To check an environment implementation, use the v1 `eval` CLI. Start with a single example and two rollouts so tasksets using group rewards can compare outputs.
+
 ```bash
 uv run eval --taskset.id <env-name> -n 1 -r 2 --max-turns 4
 ```
+
 - After comprehensive changes, check linting and styling for the environment you modified
+
 ```bash
 uv run ruff check ./environments/<env-name>
 uv run ruff format --check ./environments/<env-name>
 ```
+
 - Always keep the environment's README up-to-date with any relevant changes.
 
 ## Environment Design
