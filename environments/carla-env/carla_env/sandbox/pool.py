@@ -186,6 +186,7 @@ class CarlaSandboxConfig:
     memory_gb: int = 8
     disk_size_gb: int = 40
     timeout_minutes: int = 120
+    region: str | None = "us"
     internal_wait_mins: int = 6
     max_pool_start_attempts: int = 3
     max_concurrent_creates: int = 4
@@ -548,6 +549,8 @@ class CarlaSandboxPool:
                 cpu_cores=int(cfg.cpu_cores),
                 memory_gb=int(cfg.memory_gb),
                 gpu_count=0,
+                vm=False,
+                region=cfg.region,
                 disk_size_gb=int(cfg.disk_size_gb),
                 timeout_minutes=int(cfg.timeout_minutes),
             )
@@ -777,7 +780,12 @@ class CarlaSandboxPool:
     ) -> subprocess.Popen:
         if not mappings:
             raise RuntimeError("No sandbox mappings to start pproxy")
-        cmd: list[str] = [sys.executable, "-m", "pproxy"]
+        cmd: list[str] = [
+            sys.executable,
+            "-c",
+            "import runpy,sys; sys.modules['uvloop']=None; "
+            "runpy.run_module('pproxy',run_name='__main__')",
+        ]
         if verbose:
             cmd.append("-v")
         for remote_host, remote_port, local_host, local_port in mappings:

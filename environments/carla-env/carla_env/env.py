@@ -82,7 +82,11 @@ logger = get_logger("env")
 def _default_sandbox_start_command(version: str, wants_vision: bool) -> str:
     parsed = parse_version(version)
     if parsed == CarlaVersion.V0_9_16:
-        return "./CarlaUE4.sh -RenderOffScreen -nosound"
+        return (
+            "./CarlaUE4.sh -RenderOffScreen -nosound"
+            if wants_vision
+            else "./CarlaUE4.sh -nullrhi -nosound"
+        )
     return DEFAULT_CARLA_START_CMD_VISION if wants_vision else DEFAULT_CARLA_START_CMD_TEXT
 
 
@@ -421,6 +425,36 @@ async def episode_reward(state: vf.State, **kwargs) -> float:
         return float(outcome.get("reward", 0.0))
     except Exception:
         return 0.0
+
+
+def _trajectory_tool_call_names(state: vf.State) -> list[str]:
+    names: list[str] = []
+    for step in state.get("trajectory") or []:
+        for message in step.get("completion") or []:
+            role = message.get("role") if isinstance(message, dict) else message.role
+            if role != "assistant":
+                continue
+            calls = message.get("tool_calls") if isinstance(message, dict) else message.tool_calls
+            for call in calls or []:
+                if isinstance(call, dict):
+                    function = call.get("function") or call
+                    names.append(str(function.get("name") or ""))
+                else:
+                    names.append(str(call.name))
+    return names
+
+
+async def total_tool_calls(state: vf.State) -> float:
+    """Count model-emitted tool calls before completion rendering runs."""
+    return float(len(_trajectory_tool_call_names(state)))
+
+
+def _tool_call_count_metric(tool_name: str):
+    async def tool_call_count(state: vf.State) -> float:
+        return float(_trajectory_tool_call_names(state).count(tool_name))
+
+    tool_call_count.__name__ = f"{tool_name}_calls"
+    return tool_call_count
 
 
 def _resolve_nurec_config(
@@ -819,14 +853,13 @@ class CarlaEnv(StatefulToolEnv):
         _apply_renderer_config_to_scenario(config, scenario)
         _validate_scenario_renderer_compatibility(scenario)
 
-        # Recompute sandbox start command if vision is needed — direct
-        # construction may leave the default -nullrhi in place.
+        # Recompute the sandbox start command for the scenario. Direct
+        # construction may otherwise retain the wrong rendering mode.
         if config.sandbox and str(config.sandbox.mode).lower() != "disabled":
-            if not config.sandbox._carla_start_command_explicit and _scenario_needs_rendering(
-                scenario.config
-            ):
+            if not config.sandbox._carla_start_command_explicit:
                 config.sandbox.carla_start_command = _default_sandbox_start_command(
-                    config.sandbox.carla_version, True
+                    config.sandbox.carla_version,
+                    _scenario_needs_rendering(scenario.config),
                 )
                 config.sandbox._carla_start_command_explicit = False
 
@@ -917,6 +950,14 @@ class CarlaEnv(StatefulToolEnv):
                 tools.append(capture_depth)
         for tool in tools:
             self.add_tool(tool, args_to_skip=["state"])
+
+        # Current legacy Verifiers scores before it renders ``completion``.
+        # Count from CARLA's rollout state so tool metrics remain accurate.
+        self.tool_monitor_rubric.funcs.clear()
+        self.tool_monitor_rubric.weights.clear()
+        self.tool_monitor_rubric.add_metric(total_tool_calls)
+        for tool in tools:
+            self.tool_monitor_rubric.add_metric(_tool_call_count_metric(tool.__name__))
 
     def update_tool_args(
         self,
@@ -2232,9 +2273,11 @@ def load_environment(
                         {"role": "system", "content": "placeholder"},
                         {"role": "user", "content": "placeholder"},
                     ],
-                    "info": {"scenario": scenario_obj.config.name},
+                    "info": {
+                        "env_id": "carla_env",
+                        "scenario": scenario_obj.config.name,
+                    },
                     "example_id": 0,
-                    "task": "carla_env",
                 }
             ]
         )

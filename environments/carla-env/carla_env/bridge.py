@@ -176,7 +176,7 @@ def legacy_output_to_trace(output: Any, task: Task) -> Trace:
             error = Error(type="Error", message=str(raw_error))
 
     stop_condition = out.get("stop_condition")
-    if out.get("is_truncated") and stop_condition == "max_turns_reached":
+    if stop_condition == "max_turns_reached":
         stop_condition = "max_turns"
 
     trace = Trace(
