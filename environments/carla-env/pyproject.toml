@@ -1,0 +1,90 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "carla-env"
+version = "0.3.0"
+description = "CARLA verifiers environment with navigation, free-roam, vision, version compatibility, NuRec, and Cosmos stylization"
+readme = "README.md"
+authors = [{ name = "Sinatras" }]
+license = "MIT"
+license-files = ["LICENSE"]
+tags = ["agentic", "tool-use", "multi-turn", "robotics", "rl", "eval", "benchmark"]
+keywords = ["agentic", "tool-use", "multi-turn", "robotics", "rl", "eval", "benchmark"]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@c9da457",
+  "datasets>=3.0.0",
+  "imageio>=2.34.0",
+  "imageio-ffmpeg>=0.5.1",
+  "numpy>=1.26.0",
+  "Pillow>=10.0.0",
+  # CARLA agents deps (navigation/planning)
+  "networkx>=3.0",
+  "shapely>=2.0.0",
+  # Choose exactly one CARLA client extra: .[carla10] or .[carla9].
+  # The validated install path today is Python 3.12 + .[carla9].
+  # The base package stays importable without CARLA installed.
+  # Prime sandbox pooling (default execution mode).
+  "prime-sandboxes>=0.2.7",
+  "pproxy>=2.7",
+]
+
+[project.optional-dependencies]
+carla10 = [
+  "carla-ue5-api==0.10.0",
+]
+carla9 = [
+  "carla==0.9.16",
+]
+nurec = [
+  "grpcio>=1.60.0",
+  "protobuf>=4.25.0",
+  "scipy>=1.12.0",
+  "opencv-python>=4.9.0",
+]
+cosmos = [
+  "torch>=2.1.0",
+  "fastapi>=0.110.0",
+  "uvicorn>=0.27.0",
+  "pydantic>=2.0.0",
+]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "ruff>=0.6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["carla_env"]
+include = [
+  "carla_env/data/*.json",
+  "carla_env/_carla_agents/LICENSE",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.verifiers.eval]
+num_examples = 1
+rollouts_per_example = 1
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+cache_dir = ".pytest_cache"
+markers = [
+  "integration: requires a running CARLA server",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+  # Vendored CARLA code; not linted as part of this project.
+  "carla_env/_carla_agents",
+  "third_party",
+]
+
+[tool.ruff.lint]
+select = ["F", "I"]
