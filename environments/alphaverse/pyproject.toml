@@ -12,7 +12,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
     "pydantic>=2.11,<3",
-    "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@02cc940",
+    "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@31afe90",
 ]
 
 [tool.verifiers.eval]

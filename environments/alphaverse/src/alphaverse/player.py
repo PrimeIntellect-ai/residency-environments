@@ -742,13 +742,6 @@ class PlayerSession:
     def _has_unacknowledged_alert(self) -> bool:
         return self._strategy.last_alert_cursor > self._acknowledged_alert_cursor
 
-    def close_history(self, *, close_exchange_history: bool = True) -> None:
-        """Release retained capture data after the host has deleted an episode."""
-
-        self._strategy.inbox.close()
-        if close_exchange_history:
-            self.episode.exchange.event_log.close()
-
     def terminate(self) -> TerminationResult:
         self._staged_deployment = None
         self._finish_current_deployment("terminated")

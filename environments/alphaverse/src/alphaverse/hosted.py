@@ -1,17 +1,10 @@
-"""Thread-safe ownership and finalization of hosted Alphaverse episodes.
-
-The registry is deliberately independent of any HTTP framework.  A service can
-keep one instance alive for longer than an agent's task-scoped tool server and
-route every authenticated operation through :meth:`with_session` or the clock
-helpers below.
-"""
+"""Thread-safe ownership and finalization of task-scoped Alphaverse episodes."""
 
 from __future__ import annotations
 
 import hmac
 import secrets
 import threading
-import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -45,22 +38,8 @@ class InvalidCapability(EpisodeRegistryError):
     """The supplied bearer capability does not authorize the episode."""
 
 
-class EpisodeExpired(EpisodeRegistryError):
-    """The episode's host-time lease has elapsed."""
-
-
 class EpisodeFinalized(EpisodeRegistryError):
     """A mutating operation was requested after terminal finalization."""
-
-
-class ContinuousRunState(str, Enum):
-    """Lifecycle state of a hosted full-speed market runner."""
-
-    RUNNING = "running"
-    PAUSED = "paused"
-    STOPPED = "stopped"
-    FINALIZED = "finalized"
-    FAILED = "failed"
 
 
 class MarketSessionState(str, Enum):
@@ -79,7 +58,6 @@ class EpisodeCredentials:
     capability_token: str
     capture_token: str
     max_market_time: int | None
-    expires_at: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,33 +127,10 @@ class EpisodeMetrics:
     model_turn_count: int
 
 
-@dataclass(frozen=True, slots=True)
-class EpisodeRuntimeInfo:
-    """Non-secret lifecycle metadata for a capability-authenticated episode."""
-
-    episode_id: str
-    max_market_time: int | None
-    expires_at: float | None
-    time_mode: TimeMode
-    finalized: bool
-    market_session: MarketSessionInfo | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ContinuousRunInfo:
-    """Read-only status for one hosted background runner."""
-
-    episode_id: str
-    state: ContinuousRunState
-    step_ns: int
-    error: str | None = None
-
-
 @dataclass(slots=True)
 class _HostedRecord:
     credentials: EpisodeCredentials
     session: PlayerSession
-    created_at: float
     time_controller: EpisodeTimeController
     sessions: dict[str, PlayerSession] = field(default_factory=dict)
     participant_credentials: dict[str, ParticipantCredentials] = field(default_factory=dict)
@@ -191,29 +146,16 @@ class _HostedRecord:
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
 
-@dataclass(slots=True)
-class _ContinuousRunRecord:
-    capability_token: str
-    run_event: threading.Event
-    idle_event: threading.Event
-    stop_event: threading.Event
-    state: ContinuousRunState
-    thread: threading.Thread | None = None
-    error: str | None = None
-
-
 _T = TypeVar("_T")
 
 
 class EpisodeRegistry:
-    """Own multiple episode lifetimes behind unguessable bearer capabilities.
+    """Own task episodes behind role-scoped bearer capabilities.
 
     A short-lived registry lock protects the episode table. Each deterministic
     kernel has its own lock, so operations on one episode remain serialized
     without allowing a slow or pathological strategy to block unrelated
-    rollouts. Service integrations should avoid retaining the session returned
-    by :meth:`get_session`; use :meth:`with_session` for operations that must be
-    serialized with finalizing and deletion.
+    rollouts.
     """
 
     def __init__(
@@ -223,23 +165,13 @@ class EpisodeRegistry:
         episode_id_factory: Callable[[], str] | None = None,
         token_factory: Callable[[], str] | None = None,
         capture_token_factory: Callable[[], str] | None = None,
-        host_clock: Callable[[], float] = time.monotonic,
-        default_ttl_seconds: float | None = None,
     ) -> None:
-        if default_ttl_seconds is not None and default_ttl_seconds <= 0:
-            raise ValueError("default_ttl_seconds must be positive")
         self._episode_factory = episode_factory or (lambda episode_id: Episode(session_id=episode_id))
         self._episode_id_factory = episode_id_factory or (lambda: f"ep_{secrets.token_urlsafe(12)}")
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(32))
         self._capture_token_factory = capture_token_factory or (lambda: secrets.token_urlsafe(32))
-        self._host_clock = host_clock
-        self._default_ttl_seconds = default_ttl_seconds
         self._records: dict[str, _HostedRecord] = {}
         self._lock = threading.RLock()
-
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._records)
 
     def create(
         self,
@@ -247,7 +179,6 @@ class EpisodeRegistry:
         *,
         episode: Episode | None = None,
         max_market_time: int | None = None,
-        ttl_seconds: float | None = None,
         time_mode: TimeMode = TimeMode.MANUAL,
         wall_time_scale: float = 1.0,
         wall_quantum_ns: int = 1_000_000,
@@ -266,10 +197,6 @@ class EpisodeRegistry:
                 raise TypeError("session_duration_ns must be an int")
             if session_duration_ns <= 0:
                 raise ValueError("session_duration_ns must be positive")
-        lease = self._default_ttl_seconds if ttl_seconds is None else ttl_seconds
-        if lease is not None and lease <= 0:
-            raise ValueError("ttl_seconds must be positive")
-
         with self._lock:
             episode_id = self._unique_value(self._episode_id_factory, self._records)
             capability_token = self._token_factory()
@@ -280,7 +207,6 @@ class EpisodeRegistry:
                 raise ValueError("capture_token_factory returned an empty capability")
             if hmac.compare_digest(capability_token, capture_token):
                 raise ValueError("capture and episode capabilities must be distinct")
-            created_at = self._host_clock()
             hosted_episode = episode or self._episode_factory(episode_id)
             if max_market_time is not None and max_market_time < hosted_episode.now:
                 raise ValueError("max_market_time precedes the episode start")
@@ -290,7 +216,6 @@ class EpisodeRegistry:
                 capability_token=capability_token,
                 capture_token=capture_token,
                 max_market_time=max_market_time,
-                expires_at=None if lease is None else created_at + lease,
             )
             time_controller = EpisodeTimeController(
                 session,
@@ -312,7 +237,6 @@ class EpisodeRegistry:
             self._records[episode_id] = _HostedRecord(
                 credentials=credentials,
                 session=session,
-                created_at=created_at,
                 time_controller=time_controller,
                 sessions={focal_spec.participant_id: session},
                 session_duration_ns=session_duration_ns,
@@ -354,19 +278,6 @@ class EpisodeRegistry:
             record.sessions[spec.participant_id] = session
             record.participant_credentials[spec.participant_id] = credentials
             return credentials
-
-    def get_session(self, episode_id: str, capability_token: str) -> PlayerSession:
-        """Authenticate and retrieve a session for read-only inspection.
-
-        Callers performing mutations should prefer :meth:`with_session`, which
-        keeps the registry lock held for the entire operation.
-        """
-
-        with self._access_record(episode_id, capability_token) as record:
-            record.time_controller.before_operation()
-            self._enforce_market_cap(record)
-            self._sync_intermission(record)
-            return self._session_for_control(record, capability_token)
 
     def with_session(
         self,
@@ -422,17 +333,6 @@ class EpisodeRegistry:
                 record.time_controller.before_operation()
                 self._enforce_market_cap(record)
                 self._sync_intermission(record)
-            return operation(self._session_for_capture(record, capture_token))
-
-    def observe_capture_session(
-        self,
-        episode_id: str,
-        capture_token: str,
-        operation: Callable[[PlayerSession], _T],
-    ) -> _T:
-        """Read capture metadata without charging or advancing market time."""
-
-        with self._access_capture_record(episode_id, capture_token) as record:
             return operation(self._session_for_capture(record, capture_token))
 
     def run_until(
@@ -657,119 +557,6 @@ class EpisodeRegistry:
             ).participant_id
             return record.terminal_time_series_by_participant.get(participant_id)
 
-    def finalize_all(
-        self,
-    ) -> dict[str, tuple[EpisodeMetrics, tuple[dict[str, object], ...]]]:
-        """Administratively finalize every retained episode.
-
-        This is the host-process safety net for evaluator failures. It bypasses
-        player capabilities but still takes each episode lock and uses the same
-        idempotent terminal path as normal task finalization.
-        """
-
-        with self._lock:
-            records = tuple(self._records.items())
-        finalized: dict[str, tuple[EpisodeMetrics, tuple[dict[str, object], ...]]] = {}
-        for episode_id, record in records:
-            with record.lock:
-                if record.terminal_metrics is None:
-                    record.time_controller.before_operation()
-                    self._enforce_market_cap(record)
-                metrics = self._finalize(record)
-                series = record.terminal_time_series
-                if series is None:  # pragma: no cover - _finalize establishes it
-                    raise RuntimeError("terminal evaluator series was not produced")
-                finalized[episode_id] = (metrics, series)
-        return finalized
-
-    def finalize_all_participants(
-        self,
-    ) -> dict[
-        str,
-        dict[str, tuple[EpisodeMetrics, tuple[dict[str, object], ...]]],
-    ]:
-        """Administratively finalize and return every controlled account."""
-
-        with self._lock:
-            records = tuple(self._records.items())
-        finalized: dict[
-            str,
-            dict[str, tuple[EpisodeMetrics, tuple[dict[str, object], ...]]],
-        ] = {}
-        for episode_id, record in records:
-            with record.lock:
-                if record.terminal_metrics is None:
-                    record.time_controller.before_operation()
-                    self._enforce_market_cap(record)
-                self._finalize(record)
-                finalized[episode_id] = {
-                    participant_id: (
-                        record.terminal_metrics_by_participant[participant_id],
-                        record.terminal_time_series_by_participant[participant_id],
-                    )
-                    for participant_id in sorted(record.sessions)
-                }
-        return finalized
-
-    def describe(
-        self,
-        episode_id: str,
-        capability_token: str,
-    ) -> EpisodeRuntimeInfo:
-        """Return lifecycle metadata without advancing virtual market time."""
-
-        with self._access_record(episode_id, capability_token) as record:
-            return EpisodeRuntimeInfo(
-                episode_id=episode_id,
-                max_market_time=record.credentials.max_market_time,
-                expires_at=record.credentials.expires_at,
-                time_mode=record.time_controller.mode,
-                finalized=record.terminal_metrics is not None,
-                market_session=(None if record.session_duration_ns is None else self._market_session_info(record)),
-            )
-
-    def delete(self, episode_id: str, capability_token: str) -> EpisodeMetrics:
-        """Finalize an authenticated episode before removing all live state."""
-
-        with self._access_record(episode_id, capability_token) as record:
-            metrics = self._finalize(record)
-            with self._lock:
-                if self._records.get(episode_id) is record:
-                    del self._records[episode_id]
-                    self._close_record_history(record)
-            return metrics
-
-    def expire(self, *, now: float | None = None) -> tuple[str, ...]:
-        """Finalize and delete every lease expired by ``now``.
-
-        IDs are returned in sorted order so janitor behavior and tests remain
-        deterministic even when episodes were created concurrently.
-        """
-
-        deadline = self._host_clock() if now is None else now
-        with self._lock:
-            candidates = sorted(
-                (
-                    episode_id,
-                    record,
-                )
-                for episode_id, record in self._records.items()
-                if record.credentials.expires_at is not None and record.credentials.expires_at <= deadline
-            )
-        expired: list[str] = []
-        for episode_id, record in candidates:
-            with record.lock:
-                with self._lock:
-                    if self._records.get(episode_id) is not record:
-                        continue
-                self._finalize(record)
-                with self._lock:
-                    if self._records.get(episode_id) is record:
-                        del self._records[episode_id]
-                        self._close_record_history(record)
-                        expired.append(episode_id)
-        return tuple(expired)
-
     @contextmanager
     def _access_record(
         self,
@@ -827,13 +614,6 @@ class EpisodeRegistry:
             )
             if not any(hmac.compare_digest(expected, supplied_token) for expected in expected_tokens):
                 raise InvalidCapability(f"invalid {token_name} capability")
-            if record.credentials.expires_at is not None and record.credentials.expires_at <= self._host_clock():
-                self._finalize(record)
-                with self._lock:
-                    if self._records.get(episode_id) is record:
-                        del self._records[episode_id]
-                        self._close_record_history(record)
-                raise EpisodeExpired(f"episode expired: {episode_id}")
             yield record
 
     def _enforce_market_cap(self, record: _HostedRecord) -> None:
@@ -894,14 +674,6 @@ class EpisodeRegistry:
             if hmac.compare_digest(credentials.capture_token, capture_token):
                 return record.sessions[participant_id]
         raise InvalidCapability("invalid capture capability")
-
-    @staticmethod
-    def _close_record_history(record: _HostedRecord) -> None:
-        sessions = [record.sessions[key] for key in sorted(record.sessions)]
-        for session in sessions[:-1]:
-            session.close_history(close_exchange_history=False)
-        if sessions:
-            sessions[-1].close_history()
 
     def _finalize(self, record: _HostedRecord) -> EpisodeMetrics:
         if record.terminal_metrics is None:
@@ -1134,224 +906,6 @@ class EpisodeRegistry:
         raise RuntimeError("token_factory did not produce a unique capability")
 
 
-class ContinuousEpisodeRunner:
-    """Advance selected manual-time episodes continuously without wall pacing.
-
-    Each episode runs on a daemon thread in fixed virtual-time chunks. The
-    chunks preserve deterministic event ordering while releasing the registry
-    lock regularly for player commands and read-only observations. There is no
-    sleep or virtual-to-wall multiplier in the progression path.
-    """
-
-    def __init__(
-        self,
-        registry: EpisodeRegistry,
-        *,
-        step_ns: int = 1_000_000_000,
-        checkpoint: Callable[[str, str], None] | None = None,
-        checkpoint_interval_seconds: float = 0.5,
-    ) -> None:
-        if isinstance(step_ns, bool) or not isinstance(step_ns, int):
-            raise TypeError("step_ns must be an int")
-        if step_ns <= 0:
-            raise ValueError("step_ns must be positive")
-        if checkpoint_interval_seconds <= 0:
-            raise ValueError("checkpoint_interval_seconds must be positive")
-        self._registry = registry
-        self._step_ns = step_ns
-        self._checkpoint = checkpoint
-        self._checkpoint_interval_seconds = checkpoint_interval_seconds
-        self._records: dict[str, _ContinuousRunRecord] = {}
-        self._lock = threading.RLock()
-
-    def start(self, episode_id: str, capability_token: str) -> ContinuousRunInfo:
-        """Start or resume one episode at maximum available throughput."""
-
-        runtime = self._registry.describe(episode_id, capability_token)
-        if runtime.time_mode is not TimeMode.MANUAL:
-            raise ValueError("continuous running requires manual time mode")
-        if runtime.finalized:
-            return ContinuousRunInfo(
-                episode_id,
-                ContinuousRunState.FINALIZED,
-                self._step_ns,
-            )
-
-        with self._lock:
-            record = self._records.get(episode_id)
-            if record is not None and record.thread is not None and record.thread.is_alive():
-                if not hmac.compare_digest(record.capability_token, capability_token):
-                    raise InvalidCapability("invalid episode capability")
-                record.error = None
-                record.state = ContinuousRunState.RUNNING
-                record.idle_event.clear()
-                record.run_event.set()
-                return self._info(episode_id, record)
-
-            run_event = threading.Event()
-            run_event.set()
-            idle_event = threading.Event()
-            stop_event = threading.Event()
-            record = _ContinuousRunRecord(
-                capability_token=capability_token,
-                run_event=run_event,
-                idle_event=idle_event,
-                stop_event=stop_event,
-                state=ContinuousRunState.RUNNING,
-            )
-            thread = threading.Thread(
-                target=self._run,
-                args=(episode_id, record),
-                name=f"alphaverse-{episode_id}",
-                daemon=True,
-            )
-            record.thread = thread
-            self._records[episode_id] = record
-            thread.start()
-            return self._info(episode_id, record)
-
-    def pause(
-        self,
-        episode_id: str,
-        capability_token: str,
-        *,
-        timeout: float = 5.0,
-    ) -> ContinuousRunInfo:
-        """Pause after the in-flight deterministic chunk completes."""
-
-        runtime = self._registry.describe(episode_id, capability_token)
-        with self._lock:
-            record = self._records.get(episode_id)
-            if record is None or record.thread is None or not record.thread.is_alive():
-                state = ContinuousRunState.FINALIZED if runtime.finalized else ContinuousRunState.STOPPED
-                return ContinuousRunInfo(episode_id, state, self._step_ns)
-            if not hmac.compare_digest(record.capability_token, capability_token):
-                raise InvalidCapability("invalid episode capability")
-            record.run_event.clear()
-        if not record.idle_event.wait(timeout):
-            raise TimeoutError("continuous runner did not pause in time")
-        with self._lock:
-            if record.state is ContinuousRunState.RUNNING:
-                record.state = ContinuousRunState.PAUSED
-            return self._info(episode_id, record)
-
-    def stop(
-        self,
-        episode_id: str,
-        capability_token: str,
-        *,
-        timeout: float = 5.0,
-    ) -> ContinuousRunInfo:
-        """Stop and join a runner without finalizing its episode."""
-
-        self._registry.describe(episode_id, capability_token)
-        with self._lock:
-            record = self._records.get(episode_id)
-            if record is None:
-                return ContinuousRunInfo(
-                    episode_id,
-                    ContinuousRunState.STOPPED,
-                    self._step_ns,
-                )
-            if not hmac.compare_digest(record.capability_token, capability_token):
-                raise InvalidCapability("invalid episode capability")
-            record.stop_event.set()
-            record.run_event.set()
-            thread = record.thread
-            assert thread is not None
-        thread.join(timeout)
-        if thread.is_alive():
-            raise TimeoutError("continuous runner did not stop in time")
-        with self._lock:
-            return self._info(episode_id, record)
-
-    def status(self, episode_id: str, capability_token: str) -> ContinuousRunInfo:
-        """Return runner state after authenticating the episode capability."""
-
-        runtime = self._registry.describe(episode_id, capability_token)
-        with self._lock:
-            record = self._records.get(episode_id)
-            if record is None:
-                state = ContinuousRunState.FINALIZED if runtime.finalized else ContinuousRunState.STOPPED
-                return ContinuousRunInfo(episode_id, state, self._step_ns)
-            if runtime.finalized:
-                record.state = ContinuousRunState.FINALIZED
-            return self._info(episode_id, record)
-
-    def stop_all(self, *, timeout: float = 5.0) -> None:
-        """Stop every worker during service shutdown."""
-
-        with self._lock:
-            records = tuple(self._records.values())
-            threads = tuple(record.thread for record in records if record.thread is not None)
-            for record in records:
-                record.stop_event.set()
-                record.run_event.set()
-        deadline = time.monotonic() + timeout
-        for thread in threads:
-            thread.join(max(0.0, deadline - time.monotonic()))
-
-    def _run(self, episode_id: str, record: _ContinuousRunRecord) -> None:
-        next_checkpoint = time.monotonic()
-        try:
-            while not record.stop_event.is_set():
-                if not record.run_event.is_set():
-                    record.idle_event.set()
-                    record.run_event.wait(0.05)
-                    continue
-                record.idle_event.clear()
-                before = self._registry.observe_session(
-                    episode_id,
-                    record.capability_token,
-                    lambda session: session.now,
-                )
-                after = self._registry.run_for(
-                    episode_id,
-                    record.capability_token,
-                    self._step_ns,
-                )
-                if after == before:
-                    with self._lock:
-                        record.state = ContinuousRunState.FINALIZED
-                    return
-                now = time.monotonic()
-                if self._checkpoint is not None and now >= next_checkpoint:
-                    try:
-                        self._checkpoint(episode_id, record.capability_token)
-                    except Exception:
-                        # Development observation must never stop or pace the
-                        # canonical simulation. A later checkpoint can recover.
-                        pass
-                    next_checkpoint = now + self._checkpoint_interval_seconds
-                # Yield the GIL without pacing market time so HTTP workers can
-                # service commands between deterministic progression chunks.
-                time.sleep(0)
-        except Exception as exc:  # pragma: no cover - exact service failures vary
-            with self._lock:
-                record.error = f"{type(exc).__name__}: {exc}"
-                record.state = ContinuousRunState.FAILED
-        finally:
-            record.idle_event.set()
-            with self._lock:
-                if record.state not in (
-                    ContinuousRunState.FAILED,
-                    ContinuousRunState.FINALIZED,
-                ):
-                    record.state = ContinuousRunState.STOPPED
-
-    def _info(
-        self,
-        episode_id: str,
-        record: _ContinuousRunRecord,
-    ) -> ContinuousRunInfo:
-        return ContinuousRunInfo(
-            episode_id=episode_id,
-            state=record.state,
-            step_ns=self._step_ns,
-            error=record.error,
-        )
-
-
 def _number(value: Fraction) -> int | float:
     if value.denominator == 1:
         return value.numerator
@@ -1359,16 +913,11 @@ def _number(value: Fraction) -> int | float:
 
 
 __all__ = [
-    "ContinuousEpisodeRunner",
-    "ContinuousRunInfo",
-    "ContinuousRunState",
     "EpisodeCredentials",
-    "EpisodeExpired",
     "EpisodeFinalized",
     "EpisodeMetrics",
     "EpisodeNotFound",
     "EpisodeRegistry",
     "EpisodeRegistryError",
-    "EpisodeRuntimeInfo",
     "InvalidCapability",
 ]

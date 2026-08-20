@@ -7,9 +7,6 @@ from threading import Event
 import pytest
 from alphaverse.exchange import SessionState
 from alphaverse.hosted import (
-    ContinuousEpisodeRunner,
-    ContinuousRunState,
-    EpisodeExpired,
     EpisodeFinalized,
     EpisodeNotFound,
     EpisodeRegistry,
@@ -28,30 +25,28 @@ def _spec(participant_id: str = "player") -> ParticipantSpec:
     )
 
 
-def _registry(*, now=lambda: 10.0, **kwargs) -> EpisodeRegistry:
+def _registry(**kwargs) -> EpisodeRegistry:
     ids = iter(("episode-b", "episode-a", "episode-c"))
     tokens = iter(("secret-b", "secret-a", "secret-c"))
     return EpisodeRegistry(
         episode_id_factory=lambda: next(ids),
         token_factory=lambda: next(tokens),
-        host_clock=now,
         **kwargs,
     )
 
 
 def test_create_authenticates_an_isolated_player_session() -> None:
     registry = _registry()
-    credentials = registry.create(_spec(), max_market_time=100, ttl_seconds=30)
+    credentials = registry.create(_spec(), max_market_time=100)
 
     assert credentials.episode_id == "episode-b"
     assert credentials.capability_token == "secret-b"
     assert credentials.capture_token
     assert credentials.capture_token != credentials.capability_token
     assert credentials.max_market_time == 100
-    assert credentials.expires_at == 40.0
-    assert registry.get_session("episode-b", "secret-b").participant_id == "player"
+    assert registry.observe_session("episode-b", "secret-b", lambda session: session.participant_id) == "player"
     assert (
-        registry.observe_capture_session(
+        registry.with_capture_session(
             "episode-b",
             credentials.capture_token,
             lambda session: session.participant_id,
@@ -60,15 +55,15 @@ def test_create_authenticates_an_isolated_player_session() -> None:
     )
 
     with pytest.raises(InvalidCapability, match="invalid episode capability"):
-        registry.get_session("episode-b", "wrong")
+        registry.observe_session("episode-b", "wrong", lambda session: session.participant_id)
     with pytest.raises(InvalidCapability, match="invalid capture capability"):
-        registry.observe_capture_session(
+        registry.with_capture_session(
             "episode-b",
             credentials.capability_token,
             lambda session: session.participant_id,
         )
     with pytest.raises(EpisodeNotFound, match="unknown episode"):
-        registry.get_session("missing", "secret-b")
+        registry.observe_session("missing", "secret-b", lambda session: session.participant_id)
 
 
 def test_capture_capability_must_be_distinct_from_episode_capability() -> None:
@@ -151,26 +146,33 @@ def test_virtual_time_cap_clamps_wait_and_forces_finalization() -> None:
 def test_terminal_metrics_are_reconstructed_from_canonical_events() -> None:
     registry = _registry()
     credentials = registry.create(_spec())
-    session = registry.get_session(credentials.episode_id, credentials.capability_token)
-    exchange = session.episode.exchange
-    exchange.register_account("maker", starting_cash=10_000)
-    exchange.submit_order(
-        NewOrder("maker", "maker-bid", Side.BUY, 99, 2),
-        market_time=0,
-    )
-    exchange.submit_order(
-        NewOrder("maker", "maker-ask", Side.SELL, 101, 2),
-        market_time=0,
-    )
 
-    session.submit_limit(
-        client_order_id="take-ask",
-        side=Side.BUY,
-        price=101,
-        quantity=2,
+    def trade(session):
+        exchange = session.episode.exchange
+        exchange.register_account("maker", starting_cash=10_000)
+        exchange.submit_order(
+            NewOrder("maker", "maker-bid", Side.BUY, 99, 2),
+            market_time=0,
+        )
+        exchange.submit_order(
+            NewOrder("maker", "maker-ask", Side.SELL, 101, 2),
+            market_time=0,
+        )
+        session.submit_limit(
+            client_order_id="take-ask",
+            side=Side.BUY,
+            price=101,
+            quantity=2,
+        )
+        session.cancel("does-not-exist")
+        session.wait(duration=0)
+        return exchange
+
+    exchange = registry.with_session(
+        credentials.episode_id,
+        credentials.capability_token,
+        trade,
     )
-    session.cancel("does-not-exist")
-    session.wait(duration=0)
 
     metrics = registry.terminate(credentials.episode_id, credentials.capability_token)
     assert metrics.starting_cash == 10_000
@@ -199,7 +201,7 @@ def test_terminal_metrics_are_reconstructed_from_canonical_events() -> None:
     assert metrics.terminal_event_sequence == exchange.event_log.last_sequence
     series = registry.terminal_time_series(credentials.episode_id, credentials.capability_token)
     assert series is not None
-    assert series[-1]["market_time_ns"] == session.now
+    assert series[-1]["market_time_ns"] == metrics.market_time
     assert series[-1]["marked_pnl"] == -4.2
     assert series[-1]["focal_traded_quantity"] == 4
     assert series[-1]["position"] == 0
@@ -229,14 +231,16 @@ def test_terminal_time_series_has_regular_virtual_time_samples() -> None:
 def test_terminal_time_series_tracks_strategy_deployment_state() -> None:
     registry = _registry()
     credentials = registry.create(_spec())
-    session = registry.get_session(credentials.episode_id, credentials.capability_token)
-    session.deploy_source(
-        """
+    source = """
 from alphaverse.strategy import Strategy
 
 class StrategyImpl(Strategy):
     pass
 """
+    registry.with_session(
+        credentials.episode_id,
+        credentials.capability_token,
+        lambda session: session.deploy_source(source),
     )
     registry.run_for(
         credentials.episode_id,
@@ -253,48 +257,6 @@ class StrategyImpl(Strategy):
     assert series[-1]["strategy_active"] is False
 
 
-def test_administrative_finalize_all_uses_normal_terminal_path() -> None:
-    registry = _registry()
-    first = registry.create(_spec("first"))
-    second = registry.create(_spec("second"))
-
-    finalized = registry.finalize_all()
-
-    assert set(finalized) == {first.episode_id, second.episode_id}
-    for metrics, series in finalized.values():
-        assert metrics.termination_state is SessionState.TERMINATED
-        assert series[-1]["position"] == 0
-    assert registry.finalize_all() == finalized
-
-
-def test_administrative_finalize_all_returns_every_controlled_participant() -> None:
-    registry = _registry()
-    player = registry.create(_spec())
-    registry.add_participant(
-        player.episode_id,
-        player.capability_token,
-        ParticipantSpec(
-            participant_id="prop",
-            strategy_version_id="static-prop:v1",
-            account_starting_cash=10_000,
-        ),
-        baseline_source=("from alphaverse.strategy import Strategy\nclass StrategyImpl(Strategy):\n    pass\n"),
-    )
-
-    finalized = registry.finalize_all_participants()
-
-    assert set(finalized) == {player.episode_id}
-    assert set(finalized[player.episode_id]) == {"player", "prop"}
-    player_metrics, player_series = finalized[player.episode_id]["player"]
-    prop_metrics, prop_series = finalized[player.episode_id]["prop"]
-    assert player_metrics.participant_id == "player"
-    assert prop_metrics.participant_id == "prop"
-    assert player_metrics.deployment_count == 0
-    assert prop_metrics.deployment_count == 1
-    assert player_series[-1]["position"] == 0
-    assert prop_series[-1]["position"] == 0
-
-
 def test_terminate_is_idempotent_under_concurrent_retries() -> None:
     registry = _registry()
     credentials = registry.create(_spec())
@@ -309,56 +271,16 @@ def test_terminate_is_idempotent_under_concurrent_retries() -> None:
         results = tuple(pool.map(lambda _: terminate(), range(32)))
 
     assert all(result is results[0] for result in results)
-    session = registry.get_session(credentials.episode_id, credentials.capability_token)
-    lifecycle_states = [
-        event.data.get("state")
-        for event in session.episode.exchange.event_log
-        if event.data.get("participant_id") == "player" and event.kind.value == "session"
-    ]
+    lifecycle_states = registry.observe_session(
+        credentials.episode_id,
+        credentials.capability_token,
+        lambda session: [
+            event.data.get("state")
+            for event in session.episode.exchange.event_log
+            if event.data.get("participant_id") == "player" and event.kind.value == "session"
+        ],
+    )
     assert lifecycle_states == ["liquidation_started", "terminated"]
-
-
-def test_expiration_finalizes_then_removes_records_in_stable_order() -> None:
-    clock = [10.0]
-    registry = _registry(now=lambda: clock[0], default_ttl_seconds=5)
-    first = registry.create(_spec("player-b"))
-    second = registry.create(_spec("player-a"))
-    assert len(registry) == 2
-
-    clock[0] = 15.0
-    assert registry.expire() == ("episode-a", "episode-b")
-    assert len(registry) == 0
-    for credentials in (first, second):
-        with pytest.raises(EpisodeNotFound):
-            registry.get_session(
-                credentials.episode_id,
-                credentials.capability_token,
-            )
-
-
-def test_accessing_an_expired_episode_removes_it_and_reports_expiration() -> None:
-    clock = [0.0]
-    registry = _registry(now=lambda: clock[0])
-    credentials = registry.create(_spec(), ttl_seconds=2)
-    clock[0] = 2.0
-
-    with pytest.raises(EpisodeExpired, match="episode expired"):
-        registry.get_session(
-            credentials.episode_id,
-            credentials.capability_token,
-        )
-    assert len(registry) == 0
-
-
-def test_delete_finalizes_before_removing_episode() -> None:
-    registry = _registry()
-    credentials = registry.create(_spec())
-    metrics = registry.delete(credentials.episode_id, credentials.capability_token)
-
-    assert metrics.termination_state is SessionState.TERMINATED
-    assert len(registry) == 0
-    with pytest.raises(EpisodeNotFound):
-        registry.terminate(credentials.episode_id, credentials.capability_token)
 
 
 def test_registry_charges_trusted_token_turns_and_reports_timing() -> None:
@@ -402,11 +324,8 @@ def test_read_only_observation_of_finalized_wall_episode_does_not_advance_time()
         lambda session: session.now,
         allow_finalized=True,
     )
-    runtime = registry.describe(credentials.episode_id, credentials.capability_token)
 
     assert observed_time == metrics.market_time
-    assert runtime.time_mode is TimeMode.WALL
-    assert runtime.finalized is True
 
 
 def test_observer_projection_does_not_charge_active_wall_time() -> None:
@@ -431,65 +350,3 @@ def test_observer_projection_does_not_charge_active_wall_time() -> None:
     )
 
     assert first == second == 0
-
-
-def test_continuous_runner_advances_pauses_resumes_and_stops() -> None:
-    registry = _registry()
-    credentials = registry.create(_spec(), time_mode=TimeMode.MANUAL)
-    runner = ContinuousEpisodeRunner(registry, step_ns=10)
-
-    assert (
-        runner.start(
-            credentials.episode_id,
-            credentials.capability_token,
-        ).state
-        is ContinuousRunState.RUNNING
-    )
-    paused = runner.pause(
-        credentials.episode_id,
-        credentials.capability_token,
-    )
-    paused_at = registry.observe_session(
-        credentials.episode_id,
-        credentials.capability_token,
-        lambda session: session.now,
-    )
-    time.sleep(0.001)
-    assert paused.state is ContinuousRunState.PAUSED
-    assert (
-        registry.observe_session(
-            credentials.episode_id,
-            credentials.capability_token,
-            lambda session: session.now,
-        )
-        == paused_at
-    )
-
-    runner.start(credentials.episode_id, credentials.capability_token)
-    deadline = time.monotonic() + 1
-    while time.monotonic() < deadline:
-        current = registry.observe_session(
-            credentials.episode_id,
-            credentials.capability_token,
-            lambda session: session.now,
-        )
-        if current > paused_at:
-            break
-        time.sleep(0.001)
-    else:
-        pytest.fail("continuous runner did not resume")
-
-    stopped = runner.stop(
-        credentials.episode_id,
-        credentials.capability_token,
-    )
-    assert stopped.state is ContinuousRunState.STOPPED
-
-
-def test_continuous_runner_rejects_non_manual_time_modes() -> None:
-    registry = _registry()
-    credentials = registry.create(_spec(), time_mode=TimeMode.TOKENS)
-    runner = ContinuousEpisodeRunner(registry, step_ns=10)
-
-    with pytest.raises(ValueError, match="manual time mode"):
-        runner.start(credentials.episode_id, credentials.capability_token)
