@@ -14,8 +14,6 @@ def test_episode_artifact_bundle_is_replayable_and_self_describing(tmp_path) -> 
     runtime = EpisodeRuntime(
         EpisodeRuntimeConfig(
             episode_id="ep-artifact",
-            capability_token="control",
-            capture_token="capture",
             scenario_seed=41,
             scenario_version="mvp-v1",
             max_market_time_ns=3_000_000_000,
@@ -68,8 +66,6 @@ def test_terminal_artifacts_stream_as_verified_bounded_file_chunks(tmp_path) -> 
     runtime = EpisodeRuntime(
         EpisodeRuntimeConfig(
             episode_id="ep-stream",
-            capability_token="control",
-            capture_token="capture",
             scenario_seed=43,
             scenario_version="mvp-v1",
             max_market_time_ns=3_000_000_000,

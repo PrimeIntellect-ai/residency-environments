@@ -465,7 +465,7 @@ class ScenarioConfig:
 MVP_SCENARIO_VERSION = "mvp-v1"
 ENDOGENOUS_MIXED_SCENARIO_VERSION = "endogenous-mixed-v1"
 
-# The research cell and hosted eval profile share these exact values so a
+# The research cell and evaluation task share these exact values so a
 # calibration change cannot silently leave the task environment behind.
 ENDOGENOUS_MIXED_OVERRIDES: Mapping[str, object] = MappingProxyType(
     {

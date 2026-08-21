@@ -1,4 +1,4 @@
-"""Conservative source policy for evaluator-hosted player strategies.
+"""Conservative source policy for evaluator-owned player strategies.
 
 This is defense in depth around the child-process boundary.  It deliberately
 keeps the authoring surface small enough for the documented SDK while denying

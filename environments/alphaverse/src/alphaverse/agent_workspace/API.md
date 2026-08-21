@@ -108,6 +108,11 @@ python market_capture.py capture \
   --output market.mbo.ndjson
 ```
 
+The direct-to-file helper is configured by the bundled Alphaverse harnesses. If
+the current harness does not provide that private transport file, request the
+same bounded raw pages with `capture_market_data` and write the returned records
+to disk yourself.
+
 The capture command reads already delivered packets; use `wait` separately when
 you want more market time to pass. It prints only a small download summary. The
 raw records remain in the output file for analysis with your own code. A capture

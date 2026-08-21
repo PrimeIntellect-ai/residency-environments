@@ -39,11 +39,13 @@ horizon, capital, margin, clock, participant roster, and adaptive-prop settings.
 - Optional scheduled intermissions in which a second agent may revise a
   proprietary participant before the next market session.
 
-The bundled harness installs only the public files in
-`src/alphaverse/agent_workspace/`. Evaluated agents cannot inspect exchange,
-participant, evaluator, or latent-state implementation. Agent runtimes use
-framework-only networking; Codex web search and Claude Code web tools are
-disabled in the optional native harness adapters.
+Task setup installs only the public files in `src/alphaverse/agent_workspace/`,
+so stock coding harnesses can play without an Alphaverse-specific provisioning
+step. Evaluated agents cannot inspect exchange, participant, evaluator, or
+latent-state implementation. Agent runtimes use framework-only networking;
+Codex web search and Claude Code web tools are disabled in the optional native
+harness adapters. The bundled adapters additionally configure direct-to-file
+market capture and terminal artifact streaming after Toolset URLs exist.
 
 ## Install and validate
 
@@ -78,7 +80,9 @@ The complete agent-visible rules and API are bundled as:
 
 The market-capture helper downloads already-delivered public MBO or level-feed
 records to NDJSON in the agent workspace. It never includes private messages or
-hidden participant labels.
+hidden participant labels. Direct-to-file capture requires one of the bundled
+Alphaverse harness adapters; stock harnesses can use the equivalent bounded
+`capture_market_data` tool pages.
 
 ## Security boundary
 

@@ -2,13 +2,41 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 from types import SimpleNamespace
 
 import alphaverse.artifact_egress as egress
 import pytest
 from alphaverse.episode_runtime import EpisodeRuntime, EpisodeRuntimeConfig
 from alphaverse.replay import EpisodeReplay
+
+
+def test_framework_transport_uses_a_non_mcp_route(monkeypatch) -> None:
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    def fake_request(url, payload):
+        observed.append((url, payload))
+        return {"state": "open"}
+
+    monkeypatch.setattr(egress, "_request_json", fake_request)
+
+    result = asyncio.run(
+        egress.call_framework(
+            "http://toolset/mcp?vf_state_route=trace",
+            "coordinator-secret",
+            {"operation": "resume"},
+        )
+    )
+
+    assert result == {"state": "open"}
+    assert observed == [
+        (
+            "http://toolset/alphaverse-framework?vf_state_route=trace",
+            {
+                "capability": "coordinator-secret",
+                "request": '{"operation":"resume"}',
+            },
+        )
+    ]
 
 
 def test_harness_streams_and_verifies_terminal_artifact_files(
@@ -18,8 +46,6 @@ def test_harness_streams_and_verifies_terminal_artifact_files(
     runtime = EpisodeRuntime(
         EpisodeRuntimeConfig(
             episode_id="ep-harness-egress",
-            capability_token="control",
-            capture_token="capture",
             scenario_seed=53,
             scenario_version="mvp-v1",
             max_market_time_ns=3_000_000_000,
@@ -33,11 +59,9 @@ def test_harness_streams_and_verifies_terminal_artifact_files(
     trusted = runtime.sync_terminal()
     assert trusted is not None
 
-    async def fake_call(url, name, arguments):
+    async def fake_call(url, capability, request):
         assert url == "http://toolset/mcp"
-        assert name == "framework_channel"
-        assert arguments["capability"] == "export-secret"
-        request = json.loads(arguments["request"])
+        assert capability == "export-secret"
         assert request["operation"] == "artifact_chunk"
         return runtime.export_artifact_file(
             path=request["path"],
@@ -45,7 +69,7 @@ def test_harness_streams_and_verifies_terminal_artifact_files(
             max_bytes=request["max_bytes"],
         )
 
-    monkeypatch.setattr(egress, "call_mcp_tool", fake_call)
+    monkeypatch.setattr(egress, "call_framework", fake_call)
     trace = SimpleNamespace(
         id="trace-egress",
         state=SimpleNamespace(
@@ -83,8 +107,6 @@ def test_failed_stream_removes_incoming_directory(tmp_path, monkeypatch) -> None
     runtime = EpisodeRuntime(
         EpisodeRuntimeConfig(
             episode_id="ep-failed-egress",
-            capability_token="control",
-            capture_token="capture",
             scenario_seed=59,
             scenario_version="mvp-v1",
             max_market_time_ns=3_000_000_000,
@@ -98,8 +120,7 @@ def test_failed_stream_removes_incoming_directory(tmp_path, monkeypatch) -> None
     trusted = runtime.sync_terminal()
     assert trusted is not None
 
-    async def corrupt_call(url, name, arguments):
-        request = json.loads(arguments["request"])
+    async def corrupt_call(url, capability, request):
         chunk = runtime.export_artifact_file(
             path=request["path"],
             offset=request["offset"],
@@ -108,7 +129,7 @@ def test_failed_stream_removes_incoming_directory(tmp_path, monkeypatch) -> None
         chunk["chunk_sha256"] = "0" * 64
         return chunk
 
-    monkeypatch.setattr(egress, "call_mcp_tool", corrupt_call)
+    monkeypatch.setattr(egress, "call_framework", corrupt_call)
     trace = SimpleNamespace(
         id="trace-failed-egress",
         state=SimpleNamespace(

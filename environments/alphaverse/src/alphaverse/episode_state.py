@@ -1,9 +1,7 @@
-"""Thread-safe ownership and finalization of task-scoped Alphaverse episodes."""
+"""Coherent state and finalization for one task-scoped Alphaverse episode."""
 
 from __future__ import annotations
 
-import hmac
-import secrets
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -21,24 +19,10 @@ from alphaverse.profiles import ParticipantSpec
 from alphaverse.time_accounting import (
     EpisodeTimeController,
     TimeMode,
-    TokenTimeConfig,
-    TokenUsage,
 )
 
 
-class EpisodeRegistryError(RuntimeError):
-    """Base class for hosted episode lifecycle errors."""
-
-
-class EpisodeNotFound(EpisodeRegistryError):
-    """The requested episode does not exist."""
-
-
-class InvalidCapability(EpisodeRegistryError):
-    """The supplied bearer capability does not authorize the episode."""
-
-
-class EpisodeFinalized(EpisodeRegistryError):
+class EpisodeFinalized(RuntimeError):
     """A mutating operation was requested after terminal finalization."""
 
 
@@ -51,28 +35,8 @@ class MarketSessionState(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class EpisodeCredentials:
-    """Opaque values returned once when a hosted episode is created."""
-
-    episode_id: str
-    capability_token: str
-    capture_token: str
-    max_market_time: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class ParticipantCredentials:
-    """Role-scoped capabilities for another account in the same episode."""
-
-    episode_id: str
-    participant_id: str
-    capability_token: str
-    capture_token: str
-
-
-@dataclass(frozen=True, slots=True)
 class MarketSessionInfo:
-    """Public session-boundary state, excluding participant credentials."""
+    """Public session-boundary state."""
 
     state: MarketSessionState
     session_index: int
@@ -128,12 +92,13 @@ class EpisodeMetrics:
 
 
 @dataclass(slots=True)
-class _HostedRecord:
-    credentials: EpisodeCredentials
+class _EpisodeRecord:
+    episode_id: str
+    max_market_time: int | None
+    focal_participant_id: str
     session: PlayerSession
     time_controller: EpisodeTimeController
     sessions: dict[str, PlayerSession] = field(default_factory=dict)
-    participant_credentials: dict[str, ParticipantCredentials] = field(default_factory=dict)
     session_duration_ns: int | None = None
     session_index: int = 1
     session_start_ns: int = 0
@@ -149,32 +114,12 @@ class _HostedRecord:
 _T = TypeVar("_T")
 
 
-class EpisodeRegistry:
-    """Own task episodes behind role-scoped bearer capabilities.
-
-    A short-lived registry lock protects the episode table. Each deterministic
-    kernel has its own lock, so operations on one episode remain serialized
-    without allowing a slow or pathological strategy to block unrelated
-    rollouts.
-    """
+class EpisodeState:
+    """Own the sessions, clock, and terminal data for one Toolset episode."""
 
     def __init__(
         self,
-        *,
-        episode_factory: Callable[[str], Episode] | None = None,
-        episode_id_factory: Callable[[], str] | None = None,
-        token_factory: Callable[[], str] | None = None,
-        capture_token_factory: Callable[[], str] | None = None,
-    ) -> None:
-        self._episode_factory = episode_factory or (lambda episode_id: Episode(session_id=episode_id))
-        self._episode_id_factory = episode_id_factory or (lambda: f"ep_{secrets.token_urlsafe(12)}")
-        self._token_factory = token_factory or (lambda: secrets.token_urlsafe(32))
-        self._capture_token_factory = capture_token_factory or (lambda: secrets.token_urlsafe(32))
-        self._records: dict[str, _HostedRecord] = {}
-        self._lock = threading.RLock()
-
-    def create(
-        self,
+        episode_id: str,
         focal_spec: ParticipantSpec,
         *,
         episode: Episode | None = None,
@@ -182,10 +127,12 @@ class EpisodeRegistry:
         time_mode: TimeMode = TimeMode.MANUAL,
         wall_time_scale: float = 1.0,
         wall_quantum_ns: int = 1_000_000,
-        token_time: TokenTimeConfig | None = None,
         session_duration_ns: int | None = None,
-    ) -> EpisodeCredentials:
-        """Create an isolated episode and return its bearer credentials."""
+    ) -> None:
+        if not episode_id:
+            raise ValueError("episode_id must not be empty")
+        if time_mode is TimeMode.TOKENS:
+            raise ValueError("token time requires a trusted turn-usage bridge")
 
         if max_market_time is not None:
             if isinstance(max_market_time, bool) or not isinstance(max_market_time, int):
@@ -197,107 +144,78 @@ class EpisodeRegistry:
                 raise TypeError("session_duration_ns must be an int")
             if session_duration_ns <= 0:
                 raise ValueError("session_duration_ns must be positive")
-        with self._lock:
-            episode_id = self._unique_value(self._episode_id_factory, self._records)
-            capability_token = self._token_factory()
-            if not capability_token:
-                raise ValueError("token_factory returned an empty capability")
-            capture_token = self._capture_token_factory()
-            if not capture_token:
-                raise ValueError("capture_token_factory returned an empty capability")
-            if hmac.compare_digest(capability_token, capture_token):
-                raise ValueError("capture and episode capabilities must be distinct")
-            hosted_episode = episode or self._episode_factory(episode_id)
-            if max_market_time is not None and max_market_time < hosted_episode.now:
-                raise ValueError("max_market_time precedes the episode start")
-            session = PlayerSession(hosted_episode, focal_spec)
-            credentials = EpisodeCredentials(
-                episode_id=episode_id,
-                capability_token=capability_token,
-                capture_token=capture_token,
-                max_market_time=max_market_time,
+        owned_episode = episode or Episode(session_id=episode_id)
+        if max_market_time is not None and max_market_time < owned_episode.now:
+            raise ValueError("max_market_time precedes the episode start")
+        session = PlayerSession(owned_episode, focal_spec)
+        time_controller = EpisodeTimeController(
+            session,
+            mode=time_mode,
+            wall_time_scale=wall_time_scale,
+            wall_quantum_ns=wall_quantum_ns,
+            max_market_time=max_market_time,
+        )
+        session_end_ns = (
+            None
+            if session_duration_ns is None
+            else min(
+                session.now + session_duration_ns,
+                max_market_time if max_market_time is not None else session.now + session_duration_ns,
             )
-            time_controller = EpisodeTimeController(
-                session,
-                mode=time_mode,
-                wall_time_scale=wall_time_scale,
-                wall_quantum_ns=wall_quantum_ns,
-                token_config=token_time,
-                max_market_time=max_market_time,
-            )
-            session_end_ns = (
-                None
-                if session_duration_ns is None
-                else min(
-                    session.now + session_duration_ns,
-                    max_market_time if max_market_time is not None else session.now + session_duration_ns,
-                )
-            )
-            time_controller.set_advance_limit(session_end_ns)
-            self._records[episode_id] = _HostedRecord(
-                credentials=credentials,
-                session=session,
-                time_controller=time_controller,
-                sessions={focal_spec.participant_id: session},
-                session_duration_ns=session_duration_ns,
-                session_start_ns=session.now,
-                session_end_ns=session_end_ns,
-            )
-            if max_market_time == session.now:
-                self._finalize(self._records[episode_id])
-            return credentials
+        )
+        time_controller.set_advance_limit(session_end_ns)
+        self._record = _EpisodeRecord(
+            episode_id=episode_id,
+            max_market_time=max_market_time,
+            focal_participant_id=focal_spec.participant_id,
+            session=session,
+            time_controller=time_controller,
+            sessions={focal_spec.participant_id: session},
+            session_duration_ns=session_duration_ns,
+            session_start_ns=session.now,
+            session_end_ns=session_end_ns,
+        )
+        if max_market_time == session.now:
+            self._finalize(self._record)
 
     def add_participant(
         self,
-        episode_id: str,
-        capability_token: str,
         spec: ParticipantSpec,
         *,
         baseline_source: str | None = None,
-    ) -> ParticipantCredentials:
-        """Add another isolated account and role-scoped capabilities."""
+    ) -> None:
+        """Add another isolated account to the shared episode."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             if record.terminal_metrics is not None:
-                raise EpisodeFinalized(f"episode is finalized: {episode_id}")
+                raise EpisodeFinalized(f"episode is finalized: {record.episode_id}")
             if spec.participant_id in record.sessions:
                 raise ValueError(f"participant already exists: {spec.participant_id}")
-            control = self._unique_participant_token(record)
-            capture = self._unique_participant_token(record, exclude={control})
             session = PlayerSession(record.session.episode, spec)
             if baseline_source is not None:
                 # Seed source is evaluator-owned. Later role deployments use the
                 # ordinary untrusted path and cannot import private participants.
                 session.deploy_trusted_source(baseline_source)
-            credentials = ParticipantCredentials(
-                episode_id=episode_id,
-                participant_id=spec.participant_id,
-                capability_token=control,
-                capture_token=capture,
-            )
             record.sessions[spec.participant_id] = session
-            record.participant_credentials[spec.participant_id] = credentials
-            return credentials
 
     def with_session(
         self,
-        episode_id: str,
-        capability_token: str,
+        participant_id: str,
         operation: Callable[[PlayerSession], _T],
         *,
         allow_finalized: bool = False,
     ) -> _T:
-        """Run an authenticated operation under this episode's lock."""
+        """Run a charged participant operation under the episode lock."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             if record.terminal_metrics is None:
                 record.time_controller.before_operation()
                 self._enforce_market_cap(record)
                 self._sync_intermission(record)
-            session = self._session_for_control(record, capability_token)
+            session = self._session(record, participant_id)
             if record.terminal_metrics is not None:
                 if not allow_finalized:
-                    raise EpisodeFinalized(f"episode is finalized: {episode_id}")
+                    raise EpisodeFinalized(f"episode is finalized: {record.episode_id}")
                 return operation(session)
             result = operation(session)
             self._enforce_market_cap(record)
@@ -306,39 +224,35 @@ class EpisodeRegistry:
 
     def observe_session(
         self,
-        episode_id: str,
-        capability_token: str,
+        participant_id: str,
         operation: Callable[[PlayerSession], _T],
     ) -> _T:
         """Run a read-only projection without charging or advancing market time.
 
         The episode lock still provides a coherent observation point. Unlike
-        :meth:`with_session`, this path never invokes the configured wall- or
-        token-time bridge, so observer refresh cadence cannot drive an episode.
+        :meth:`with_session`, this path never invokes the configured wall-time
+        bridge, so observer refresh cadence cannot drive an episode.
         """
 
-        with self._access_record(episode_id, capability_token) as record:
-            return operation(self._session_for_control(record, capability_token))
+        with self._access_record() as record:
+            return operation(self._session(record, participant_id))
 
     def with_capture_session(
         self,
-        episode_id: str,
-        capture_token: str,
+        participant_id: str,
         operation: Callable[[PlayerSession], _T],
     ) -> _T:
         """Run a read-only capture after charging this episode's time bridge."""
 
-        with self._access_capture_record(episode_id, capture_token) as record:
+        with self._access_record() as record:
             if record.terminal_metrics is None:
                 record.time_controller.before_operation()
                 self._enforce_market_cap(record)
                 self._sync_intermission(record)
-            return operation(self._session_for_capture(record, capture_token))
+            return operation(self._session(record, participant_id))
 
     def run_until(
         self,
-        episode_id: str,
-        capability_token: str,
         market_time: int,
         *,
         interrupt_on_alert: bool = False,
@@ -347,7 +261,7 @@ class EpisodeRegistry:
 
         if isinstance(market_time, bool) or not isinstance(market_time, int):
             raise TypeError("market_time must be an int")
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             record.time_controller.before_operation()
             self._enforce_market_cap(record)
             self._sync_intermission(record)
@@ -360,7 +274,7 @@ class EpisodeRegistry:
                     interrupted_by_alert=False,
                 )
             target = market_time
-            cap = record.credentials.max_market_time
+            cap = record.max_market_time
             if cap is not None:
                 target = min(target, cap)
             result = record.time_controller.voluntary_wait(
@@ -373,8 +287,6 @@ class EpisodeRegistry:
 
     def run_for(
         self,
-        episode_id: str,
-        capability_token: str,
         duration: int,
         *,
         interrupt_on_alert: bool = False,
@@ -385,7 +297,7 @@ class EpisodeRegistry:
             raise TypeError("duration must be an int")
         if duration < 0:
             raise ValueError("duration must be non-negative")
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             record.time_controller.before_operation()
             self._enforce_market_cap(record)
             self._sync_intermission(record)
@@ -407,15 +319,14 @@ class EpisodeRegistry:
 
     def terminate(
         self,
-        episode_id: str,
-        capability_token: str,
+        participant_id: str | None = None,
     ) -> EpisodeMetrics:
         """Finalize once and return the same persisted metrics on every retry."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             record.time_controller.before_operation()
             metrics = self._finalize(record)
-            session = self._session_for_control(record, capability_token)
+            session = self._session(record, participant_id or record.focal_participant_id)
             return record.terminal_metrics_by_participant.get(
                 session.participant_id,
                 metrics,
@@ -423,21 +334,20 @@ class EpisodeRegistry:
 
     def deploy_source(
         self,
-        episode_id: str,
-        capability_token: str,
+        participant_id: str,
         source: str,
         *,
         entrypoint: str,
     ) -> tuple[str, bool, dict[str, object]]:
         """Deploy while open, or stage the validated artifact during a close."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             if record.terminal_metrics is not None:
-                raise EpisodeFinalized(f"episode is finalized: {episode_id}")
+                raise EpisodeFinalized(f"episode is finalized: {record.episode_id}")
             record.time_controller.before_operation()
             self._enforce_market_cap(record)
             self._sync_intermission(record)
-            session = self._session_for_control(record, capability_token)
+            session = self._session(record, participant_id)
             if record.intermission:
                 version_id = session.stage_source(source, entrypoint=entrypoint)
                 staged = True
@@ -446,39 +356,27 @@ class EpisodeRegistry:
                 staged = False
             return version_id, staged, session.strategy_status()
 
-    def market_session_info(
-        self,
-        episode_id: str,
-        capability_token: str,
-    ) -> MarketSessionInfo:
+    def market_session_info(self) -> MarketSessionInfo:
         """Return the current open/intermission boundary state without charging time."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             self._sync_intermission(record)
             return self._market_session_info(record)
 
-    def require_market_open(
-        self,
-        episode_id: str,
-        capability_token: str,
-    ) -> None:
+    def require_market_open(self) -> None:
         """Reject direct trading mutations while the whole market is frozen."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             self._sync_intermission(record)
             if record.intermission:
                 raise ValueError("market is closed for a research intermission")
             if record.terminal_metrics is not None:
-                raise EpisodeFinalized(f"episode is finalized: {episode_id}")
+                raise EpisodeFinalized(f"episode is finalized: {record.episode_id}")
 
-    def resume_market_session(
-        self,
-        episode_id: str,
-        capability_token: str,
-    ) -> MarketSessionInfo:
+    def resume_market_session(self) -> MarketSessionInfo:
         """Activate staged strategies and open the next virtual-time chunk."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             if record.terminal_metrics is not None:
                 return self._market_session_info(record)
             if record.session_duration_ns is None:
@@ -498,141 +396,66 @@ class EpisodeRegistry:
             record.session_index += 1
             record.session_start_ns = record.session.now
             boundary = record.session.now + record.session_duration_ns
-            cap = record.credentials.max_market_time
+            cap = record.max_market_time
             record.session_end_ns = min(boundary, cap) if cap is not None else boundary
             record.intermission = False
             record.time_controller.set_advance_limit(record.session_end_ns)
             record.time_controller.resume()
             return self._market_session_info(record)
 
-    def commit_turn(
-        self,
-        episode_id: str,
-        capability_token: str,
-        turn_id: str,
-        usage: TokenUsage,
-    ) -> int:
-        """Advance token-metered time from one trusted interception commit."""
-
-        with self._access_record(episode_id, capability_token) as record:
-            if record.terminal_metrics is not None:
-                return 0
-            delta = record.time_controller.commit_turn(turn_id, usage)
-            self._enforce_market_cap(record)
-            return delta
-
     def terminal_metrics(
         self,
-        episode_id: str,
-        capability_token: str,
+        participant_id: str | None = None,
     ) -> EpisodeMetrics | None:
         """Return the persisted terminal snapshot, if finalization has occurred."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             self._enforce_market_cap(record)
             if record.terminal_metrics is None:
                 return None
-            participant_id = self._session_for_control(
-                record,
-                capability_token,
-            ).participant_id
-            return record.terminal_metrics_by_participant.get(participant_id)
+            selected = participant_id or record.focal_participant_id
+            return record.terminal_metrics_by_participant.get(selected)
 
     def terminal_time_series(
         self,
-        episode_id: str,
-        capability_token: str,
+        participant_id: str | None = None,
     ) -> tuple[dict[str, object], ...] | None:
         """Return evaluator diagnostics produced during terminal finalization."""
 
-        with self._access_record(episode_id, capability_token) as record:
+        with self._access_record() as record:
             self._enforce_market_cap(record)
             if record.terminal_metrics is not None and not record.terminal_time_series_by_participant:
                 self._finalize(record)
             if record.terminal_metrics is None:
                 return None
-            participant_id = self._session_for_control(
-                record,
-                capability_token,
-            ).participant_id
-            return record.terminal_time_series_by_participant.get(participant_id)
+            selected = participant_id or record.focal_participant_id
+            return record.terminal_time_series_by_participant.get(selected)
 
     @contextmanager
-    def _access_record(
-        self,
-        episode_id: str,
-        capability_token: str,
-    ):
-        """Authenticate and hold exactly one episode lock for an operation."""
+    def _access_record(self):
+        """Hold the episode lock for one coherent operation."""
 
-        with self._access_record_token(
-            episode_id,
-            capability_token,
-            token_name="episode",
-        ) as record:
-            yield record
-
-    @contextmanager
-    def _access_capture_record(
-        self,
-        episode_id: str,
-        capture_token: str,
-    ):
-        """Authenticate and hold one episode under its read-only capture token."""
-
-        with self._access_record_token(
-            episode_id,
-            capture_token,
-            token_name="capture",
-        ) as record:
-            yield record
-
-    @contextmanager
-    def _access_record_token(
-        self,
-        episode_id: str,
-        supplied_token: str,
-        *,
-        token_name: str,
-    ):
-        if not isinstance(supplied_token, str):
-            raise InvalidCapability(f"invalid {token_name} capability")
-        with self._lock:
-            record = self._records.get(episode_id)
-        if record is None:
-            raise EpisodeNotFound(f"unknown episode: {episode_id}")
+        record = self._record
         with record.lock:
-            with self._lock:
-                if self._records.get(episode_id) is not record:
-                    raise EpisodeNotFound(f"unknown episode: {episode_id}")
-            expected_tokens = [
-                record.credentials.capability_token if token_name == "episode" else record.credentials.capture_token
-            ]
-            expected_tokens.extend(
-                credentials.capability_token if token_name == "episode" else credentials.capture_token
-                for credentials in record.participant_credentials.values()
-            )
-            if not any(hmac.compare_digest(expected, supplied_token) for expected in expected_tokens):
-                raise InvalidCapability(f"invalid {token_name} capability")
             yield record
 
-    def _enforce_market_cap(self, record: _HostedRecord) -> None:
-        cap = record.credentials.max_market_time
+    def _enforce_market_cap(self, record: _EpisodeRecord) -> None:
+        cap = record.max_market_time
         if cap is not None and record.session.now >= cap and record.terminal_metrics is None:
             self._finalize(record)
 
-    def _sync_intermission(self, record: _HostedRecord) -> None:
+    def _sync_intermission(self, record: _EpisodeRecord) -> None:
         if (
             record.terminal_metrics is None
             and record.session_end_ns is not None
             and record.session.now >= record.session_end_ns
-            and (record.credentials.max_market_time is None or record.session.now < record.credentials.max_market_time)
+            and (record.max_market_time is None or record.session.now < record.max_market_time)
         ):
             record.intermission = True
             record.time_controller.pause()
 
     @staticmethod
-    def _market_session_info(record: _HostedRecord) -> MarketSessionInfo:
+    def _market_session_info(record: _EpisodeRecord) -> MarketSessionInfo:
         state = (
             MarketSessionState.FINALIZED
             if record.terminal_metrics is not None
@@ -649,33 +472,13 @@ class EpisodeRegistry:
         )
 
     @staticmethod
-    def _session_for_control(
-        record: _HostedRecord,
-        capability_token: str,
-    ) -> PlayerSession:
-        if hmac.compare_digest(
-            record.credentials.capability_token,
-            capability_token,
-        ):
-            return record.session
-        for participant_id, credentials in record.participant_credentials.items():
-            if hmac.compare_digest(credentials.capability_token, capability_token):
-                return record.sessions[participant_id]
-        raise InvalidCapability("invalid episode capability")
+    def _session(record: _EpisodeRecord, participant_id: str) -> PlayerSession:
+        try:
+            return record.sessions[participant_id]
+        except KeyError as exc:
+            raise ValueError(f"unknown participant: {participant_id}") from exc
 
-    @staticmethod
-    def _session_for_capture(
-        record: _HostedRecord,
-        capture_token: str,
-    ) -> PlayerSession:
-        if hmac.compare_digest(record.credentials.capture_token, capture_token):
-            return record.session
-        for participant_id, credentials in record.participant_credentials.items():
-            if hmac.compare_digest(credentials.capture_token, capture_token):
-                return record.sessions[participant_id]
-        raise InvalidCapability("invalid capture capability")
-
-    def _finalize(self, record: _HostedRecord) -> EpisodeMetrics:
+    def _finalize(self, record: _EpisodeRecord) -> EpisodeMetrics:
         if record.terminal_metrics is None:
             for participant_id in sorted(record.sessions):
                 record.sessions[participant_id].terminate()
@@ -688,18 +491,18 @@ class EpisodeRegistry:
                 )
                 for participant_id, session in record.sessions.items()
             }
-            record.terminal_metrics = record.terminal_metrics_by_participant[record.session.participant_id]
+            record.terminal_metrics = record.terminal_metrics_by_participant[record.focal_participant_id]
         if record.terminal_time_series is None:
             record.terminal_time_series_by_participant = {
                 participant_id: tuple(build_evaluation_series(session))
                 for participant_id, session in record.sessions.items()
             }
-            record.terminal_time_series = record.terminal_time_series_by_participant[record.session.participant_id]
+            record.terminal_time_series = record.terminal_time_series_by_participant[record.focal_participant_id]
         return record.terminal_metrics
 
     @staticmethod
     def _derive_metrics(
-        record: _HostedRecord,
+        record: _EpisodeRecord,
         *,
         session: PlayerSession | None = None,
     ) -> EpisodeMetrics:
@@ -828,9 +631,9 @@ class EpisodeRegistry:
         exact_max_drawdown = max_drawdown_subunits / account.cash_subunits_per_tick
         strategy_diagnostics = session.strategy_diagnostics()
         advances = record.time_controller.advances
-        is_focal_player = participant_id == record.session.participant_id
+        is_focal_player = participant_id == record.focal_participant_id
         return EpisodeMetrics(
-            episode_id=record.credentials.episode_id,
+            episode_id=record.episode_id,
             participant_id=participant_id,
             market_time=session.now,
             terminal_event_sequence=exchange.event_log.last_sequence,
@@ -873,38 +676,6 @@ class EpisodeRegistry:
             model_turn_count=(record.time_controller.committed_turn_count if is_focal_player else 0),
         )
 
-    @staticmethod
-    def _unique_value(factory: Callable[[], str], existing: object) -> str:
-        for _ in range(100):
-            candidate = factory()
-            if not candidate:
-                raise ValueError("episode_id_factory returned an empty id")
-            if candidate not in existing:
-                return candidate
-        raise RuntimeError("episode_id_factory did not produce a unique id")
-
-    def _unique_participant_token(
-        self,
-        record: _HostedRecord,
-        *,
-        exclude: set[str] | None = None,
-    ) -> str:
-        existing = {
-            record.credentials.capability_token,
-            record.credentials.capture_token,
-        }
-        for credentials in record.participant_credentials.values():
-            existing.add(credentials.capability_token)
-            existing.add(credentials.capture_token)
-        existing.update(exclude or set())
-        for _ in range(100):
-            candidate = self._token_factory()
-            if not candidate:
-                raise ValueError("token_factory returned an empty capability")
-            if candidate not in existing:
-                return candidate
-        raise RuntimeError("token_factory did not produce a unique capability")
-
 
 def _number(value: Fraction) -> int | float:
     if value.denominator == 1:
@@ -913,11 +684,7 @@ def _number(value: Fraction) -> int | float:
 
 
 __all__ = [
-    "EpisodeCredentials",
     "EpisodeFinalized",
     "EpisodeMetrics",
-    "EpisodeNotFound",
-    "EpisodeRegistry",
-    "EpisodeRegistryError",
-    "InvalidCapability",
+    "EpisodeState",
 ]

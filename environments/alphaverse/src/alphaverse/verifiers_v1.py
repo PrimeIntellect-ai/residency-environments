@@ -11,9 +11,11 @@ from urllib.parse import quote
 import verifiers.v1 as vf
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from alphaverse.artifact_egress import FRAMEWORK_ROUTE
 from alphaverse.capture import market_capture_spec as build_market_capture_spec
 from alphaverse.episode_runtime import EpisodeRuntime, EpisodeRuntimeConfig
 from alphaverse.prop_trader import PROP_PARTICIPANT_ID, competitive_prop_source
+from alphaverse.workspace import install_task_workspace
 from alphaverse.world import LatentDemandProfile
 
 
@@ -108,8 +110,6 @@ class AlphaverseState(vf.State):
     model_config = ConfigDict(extra="forbid")
 
     episode_id: str | None = None
-    capability_token: str | None = None
-    capture_token: str | None = None
     terminated: bool = False
     event_cursor: int = Field(default=0, ge=0)
     market_time_ns: int = Field(default=0, ge=0)
@@ -137,13 +137,9 @@ class AlphaverseToolsetConfig(vf.ToolsetConfig):
         ge=64 * 1024,
         le=8 * 1024 * 1024,
     )
-    time_mode: Literal["manual", "wall", "tokens"] = "wall"
+    time_mode: Literal["manual", "wall"] = "wall"
     wall_time_scale: float = Field(default=1.0, ge=0)
     wall_quantum_ns: int = Field(default=1_000_000, gt=0)
-    ns_per_turn: int = Field(default=0, ge=0)
-    ns_per_input_token: int = Field(default=0, ge=0)
-    ns_per_cached_input_token: int = Field(default=0, ge=0)
-    ns_per_output_token: int = Field(default=0, ge=0)
     initial_margin_per_contract: int = Field(default=5_000, gt=0)
     maintenance_margin_per_contract: int = Field(default=4_000, gt=0)
     margin_liquidation_grace_ns: int = Field(default=30_000_000_000, ge=0)
@@ -186,20 +182,15 @@ class AlphaverseTaskConfig(vf.TaskConfig):
     model_config = ConfigDict(extra="forbid")
 
     toolset: AlphaverseToolsetConfig = AlphaverseToolsetConfig()
-    time_mode: Literal["manual", "wall", "tokens"] = "wall"
+    time_mode: Literal["manual", "wall"] = "wall"
     wall_time_scale: float = Field(default=1.0, ge=0)
     wall_quantum_ns: int = Field(default=1_000_000, gt=0)
-    ns_per_turn: int = Field(default=0, ge=0)
-    ns_per_input_token: int = Field(default=0, ge=0)
-    ns_per_cached_input_token: int = Field(default=0, ge=0)
-    ns_per_output_token: int = Field(default=0, ge=0)
     initial_margin_per_contract: int = Field(default=5_000, gt=0)
     maintenance_margin_per_contract: int = Field(default=4_000, gt=0)
     margin_liquidation_grace_ns: int = Field(default=30_000_000_000, ge=0)
     reward_scale: float = Field(default=10_000.0, gt=0)
     reward_clip: float = Field(default=10.0, gt=0)
     incomplete_liquidation_penalty: float = Field(default=1.0, ge=0)
-    rollout_error_penalty: float = Field(default=0.25, ge=0)
     adaptive_prop: bool = False
     prop_seed_profile: Literal["passive", "competitive"] = "passive"
     prop_control_scope: Literal["full_source", "knobs"] = "full_source"
@@ -232,6 +223,23 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
     """Task-scoped MCP surface for one evaluator-owned episode."""
 
     TOOL_PREFIX = "alphaverse"
+    _PUBLIC_TOOLS = {
+        "market_snapshot",
+        "events",
+        "account",
+        "product_terms",
+        "market_capture_spec",
+        "capture_market_data",
+        "open_orders",
+        "submit_limit_order",
+        "cancel_order",
+        "wait",
+        "deploy_strategy",
+        "strategy_status",
+        "session_status",
+        "stop_strategy",
+        "terminate_session",
+    }
 
     def __init__(self, config: AlphaverseToolsetConfig) -> None:
         super().__init__(config)
@@ -242,21 +250,52 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
     async def setup_task(self, task: AlphaverseData) -> None:
         self._task_data = task
 
+    @staticmethod
+    def _register_tools(mcp, toolset: "AlphaverseToolset", allowed: set[str]) -> None:
+        from verifiers.v1.utils.decorators import discover_decorated
+
+        for fn in discover_decorated(toolset, "tool"):
+            if fn.__name__ not in allowed:
+                continue
+            mcp.add_tool(
+                toolset._with_state(fn),
+                name=getattr(fn, "tool_name", None) or fn.__name__,
+                description=(fn.__doc__ or "").strip() or None,
+            )
+
+    def register(self, mcp) -> None:
+        """Expose gameplay tools and a non-discoverable evaluator route."""
+
+        from starlette.responses import JSONResponse
+
+        self._register_tools(mcp, self, self._PUBLIC_TOOLS)
+        framework_call = self._with_state(self._framework_request)
+
+        @mcp.custom_route(
+            FRAMEWORK_ROUTE,
+            methods=["POST"],
+            include_in_schema=False,
+        )
+        async def framework_route(request):
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise TypeError("framework payload must be an object")
+            capability = payload.get("capability")
+            encoded_request = payload.get("request")
+            if not isinstance(capability, str) or not isinstance(encoded_request, str):
+                raise TypeError("framework payload requires string capability and request")
+            return JSONResponse(await framework_call(capability, encoded_request))
+
     def _embedded(self) -> EpisodeRuntime:
         if self._runtime is not None:
             return self._runtime
         data = self._task_data
         if data is None:
             raise RuntimeError("Alphaverse task data is unavailable")
-        episode_id, capability = self._coordinates()
-        capture = self.state.capture_token
-        if not isinstance(capture, str) or not capture:
-            raise RuntimeError("Alphaverse capture capability is unavailable")
+        episode_id = self._episode_id()
         self._runtime = EpisodeRuntime(
             EpisodeRuntimeConfig(
                 episode_id=episode_id,
-                capability_token=capability,
-                capture_token=capture,
                 scenario_seed=data.scenario_seed,
                 scenario_version=data.scenario_version,
                 latent_demand_profile=data.latent_demand_profile,
@@ -265,10 +304,6 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
                 time_mode=self.config.time_mode,
                 wall_time_scale=self.config.wall_time_scale,
                 wall_quantum_ns=self.config.wall_quantum_ns,
-                ns_per_turn=self.config.ns_per_turn,
-                ns_per_input_token=self.config.ns_per_input_token,
-                ns_per_cached_input_token=self.config.ns_per_cached_input_token,
-                ns_per_output_token=self.config.ns_per_output_token,
                 initial_margin_per_contract=self.config.initial_margin_per_contract,
                 maintenance_margin_per_contract=(self.config.maintenance_margin_per_contract),
                 margin_liquidation_grace_ns=(self.config.margin_liquidation_grace_ns),
@@ -285,12 +320,11 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         )
         return self._runtime
 
-    def _coordinates(self) -> tuple[str, str]:
+    def _episode_id(self) -> str:
         episode_id = self.state.episode_id
-        token = self.state.capability_token
-        if not episode_id or not token:
+        if not episode_id:
             raise RuntimeError("Alphaverse episode has not been initialized")
-        return episode_id, token
+        return episode_id
 
     def _embedded_participant_id(self) -> str:
         role = _mcp_query_value("alphaverse_role")
@@ -506,8 +540,7 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         self._update_state(response, participant_id=participant_id)
         return response
 
-    @vf.tool
-    async def framework_channel(
+    async def _framework_request(
         self,
         capability: str,
         request: str,
@@ -655,16 +688,7 @@ class AlphaversePropToolset(AlphaverseToolset):
     }
 
     def register(self, mcp) -> None:
-        from verifiers.v1.utils.decorators import discover_decorated
-
-        for fn in discover_decorated(self, "tool"):
-            if fn.__name__ not in self._ALLOWED_TOOLS:
-                continue
-            mcp.add_tool(
-                self._with_state(fn),
-                name=getattr(fn, "tool_name", None) or fn.__name__,
-                description=(fn.__doc__ or "").strip() or None,
-            )
+        self._register_tools(mcp, self, self._ALLOWED_TOOLS)
 
 
 class AlphaverseKnobPropToolset(AlphaversePropToolset):
@@ -685,10 +709,6 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
                 "time_mode": config.time_mode,
                 "wall_time_scale": config.wall_time_scale,
                 "wall_quantum_ns": config.wall_quantum_ns,
-                "ns_per_turn": config.ns_per_turn,
-                "ns_per_input_token": config.ns_per_input_token,
-                "ns_per_cached_input_token": config.ns_per_cached_input_token,
-                "ns_per_output_token": config.ns_per_output_token,
                 "initial_margin_per_contract": config.initial_margin_per_contract,
                 "maintenance_margin_per_contract": (config.maintenance_margin_per_contract),
                 "margin_liquidation_grace_ns": (config.margin_liquidation_grace_ns),
@@ -704,9 +724,8 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
     async def setup(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
         if self.data.join_episode_id is not None:
             raise RuntimeError("the episode owner cannot join an existing task-scoped Toolset")
+        await install_task_workspace(self.data, runtime)
         trace.state.episode_id = f"ep_{secrets.token_urlsafe(12)}"
-        trace.state.capability_token = secrets.token_urlsafe(32)
-        trace.state.capture_token = secrets.token_urlsafe(32)
         trace.state.artifact_export_token = secrets.token_urlsafe(32)
         trace.state.participant_id = self.data.participant_id
         if self.config.adaptive_prop:
@@ -755,25 +774,20 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
         return bool(isinstance(trace.state.terminal_summary, dict) and trace.state.artifact_egress_complete)
 
     @staticmethod
-    def _number(summary: dict[str, Any], *keys: str) -> float:
-        for key in keys:
-            value = summary.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                return float(value)
-            if isinstance(value, str):
-                try:
-                    return float(value)
-                except ValueError:
-                    pass
-        return 0.0
+    def _number(summary: dict[str, Any], key: str) -> float:
+        value = summary[key]
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise TypeError(f"terminal summary field {key!r} must be numeric")
+        return float(value)
 
     @classmethod
     def _liquidation_failed(cls, summary: dict[str, Any]) -> bool:
-        remaining = cls._number(summary, "remaining_position", "position")
-        state = summary.get("termination_state")
+        remaining = cls._number(summary, "position")
+        state = summary["termination_state"]
+        if not isinstance(state, str):
+            raise TypeError("terminal summary field 'termination_state' must be a string")
         return bool(
-            summary.get("liquidation_failed", False)
-            or remaining != 0
+            remaining != 0
             or state
             in {
                 "active",
@@ -789,19 +803,13 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
 
         summary = trace.info.get("alphaverse", {})
         if not isinstance(summary, dict):
+            raise TypeError("Alphaverse terminal summary must be an object")
+        if summary.get("termination_state") == "incomplete":
             return -self.config.incomplete_liquidation_penalty
-        pnl = self._number(summary, "realized_pnl", "terminal_pnl", "pnl")
-        if not any(key in summary for key in ("realized_pnl", "terminal_pnl", "pnl")):
-            terminal_cash = self._number(summary, "terminal_cash", "cash")
-            pnl = terminal_cash - self.data.starting_cash
+        pnl = self._number(summary, "pnl")
         score = pnl / self.config.reward_scale
         if self._liquidation_failed(summary):
             score -= self.config.incomplete_liquidation_penalty
-        # Scoring runs before Verifiers marks a successfully completed trace
-        # ``ok=True``.  Recorded errors/its stop condition, rather than the
-        # transient ``ok`` flag, identify an actual rollout failure here.
-        if trace.errors or trace.stop_condition == "error":
-            score -= self.config.rollout_error_penalty
         return max(-self.config.reward_clip, min(self.config.reward_clip, score))
 
     @vf.metric
@@ -810,7 +818,7 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
 
         summary = trace.info.get("alphaverse", {})
         if not isinstance(summary, dict):
-            summary = {}
+            raise TypeError("Alphaverse terminal summary must be an object")
         # Verifiers v0.2.2 records inference usage on ModelCall objects.  Older
         # releases attached it to sampled message nodes, so keep that fallback
         # to make saved/pre-upgrade traces and local adapters harmless.
@@ -825,49 +833,74 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
         reasoning_tokens = sum(usage.reasoning_tokens or 0 for usage in usages)
         reported_costs = [usage.cost for usage in usages if usage.cost is not None]
         observed_model_turns = trace.num_turns
-        terminal_cash = self._number(summary, "terminal_cash", "cash")
-        pnl = self._number(summary, "realized_pnl", "terminal_pnl", "pnl")
-        if not any(key in summary for key in ("realized_pnl", "terminal_pnl", "pnl")):
-            pnl = terminal_cash - self.data.starting_cash
-        metrics = {
-            "terminal_cash": terminal_cash,
-            "terminal_pnl": pnl,
-            "remaining_position": self._number(summary, "remaining_position", "position"),
-            "max_abs_position": self._number(summary, "max_abs_position"),
-            "max_drawdown": self._number(summary, "max_drawdown", "drawdown"),
-            "gross_traded_quantity": self._number(
-                summary,
-                "gross_traded_quantity",
-                "gross_filled_quantity",
-                "gross_quantity",
-            ),
-            "fill_count": self._number(summary, "fill_count", "fills"),
-            "fees_paid": self._number(summary, "fees_paid"),
-            "order_count": self._number(summary, "order_count", "orders"),
-            "rejection_count": self._number(summary, "rejection_count", "rejections"),
-            "order_rejection_count": self._number(summary, "order_rejection_count"),
-            "cancel_rejection_count": self._number(summary, "cancel_rejection_count"),
-            "margin_rejection_count": self._number(summary, "margin_rejection_count"),
-            "margin_call_count": self._number(summary, "margin_call_count"),
-            "margin_liquidation_count": self._number(summary, "margin_liquidation_count"),
-            "margin_liquidated_quantity": self._number(summary, "margin_liquidated_quantity"),
-            "strategy_fault_count": self._number(summary, "strategy_fault_count", "strategy_faults"),
-            "deployment_count": self._number(summary, "deployment_count", "deployments"),
-            "unique_strategy_version_count": self._number(summary, "unique_strategy_version_count"),
-            "strategy_stop_count": self._number(summary, "strategy_stop_count", "strategy_stops"),
-            "market_time_ns": self._number(summary, "market_time_ns", "market_time"),
-            "voluntary_wait_ns": self._number(summary, "voluntary_wait_ns"),
-            "charged_agent_time_ns": self._number(summary, "charged_agent_time_ns"),
-            "model_turn_count": max(
-                self._number(summary, "model_turn_count"),
-                float(observed_model_turns),
-            ),
-            "prompt_tokens": float(prompt_tokens),
-            "completion_tokens": float(completion_tokens),
-            "cached_input_tokens": float(cached_input_tokens),
-            "reasoning_tokens": float(reasoning_tokens),
-            "liquidation_failed": float(self._liquidation_failed(summary)),
-        }
+        metrics = (
+            {
+                "terminal_cash": float(self.data.starting_cash),
+                "terminal_pnl": 0.0,
+                "remaining_position": 0.0,
+                "max_abs_position": 0.0,
+                "max_drawdown": 0.0,
+                "gross_traded_quantity": 0.0,
+                "fill_count": 0.0,
+                "fees_paid": 0.0,
+                "order_count": 0.0,
+                "rejection_count": 0.0,
+                "order_rejection_count": 0.0,
+                "cancel_rejection_count": 0.0,
+                "margin_rejection_count": 0.0,
+                "margin_call_count": 0.0,
+                "margin_liquidation_count": 0.0,
+                "margin_liquidated_quantity": 0.0,
+                "strategy_fault_count": 0.0,
+                "deployment_count": 0.0,
+                "unique_strategy_version_count": 0.0,
+                "strategy_stop_count": 0.0,
+                "market_time_ns": float(trace.state.market_time_ns),
+                "voluntary_wait_ns": 0.0,
+                "charged_agent_time_ns": 0.0,
+                "model_turn_count": float(observed_model_turns),
+                "liquidation_failed": 1.0,
+            }
+            if summary.get("termination_state") == "incomplete"
+            else {
+                "terminal_cash": self._number(summary, "cash"),
+                "terminal_pnl": self._number(summary, "pnl"),
+                "remaining_position": self._number(summary, "position"),
+                "max_abs_position": self._number(summary, "max_abs_position"),
+                "max_drawdown": self._number(summary, "max_drawdown"),
+                "gross_traded_quantity": self._number(summary, "gross_filled_quantity"),
+                "fill_count": self._number(summary, "fill_count"),
+                "fees_paid": self._number(summary, "fees_paid"),
+                "order_count": self._number(summary, "order_count"),
+                "rejection_count": self._number(summary, "rejection_count"),
+                "order_rejection_count": self._number(summary, "order_rejection_count"),
+                "cancel_rejection_count": self._number(summary, "cancel_rejection_count"),
+                "margin_rejection_count": self._number(summary, "margin_rejection_count"),
+                "margin_call_count": self._number(summary, "margin_call_count"),
+                "margin_liquidation_count": self._number(summary, "margin_liquidation_count"),
+                "margin_liquidated_quantity": self._number(summary, "margin_liquidated_quantity"),
+                "strategy_fault_count": self._number(summary, "strategy_fault_count"),
+                "deployment_count": self._number(summary, "deployment_count"),
+                "unique_strategy_version_count": self._number(summary, "unique_strategy_version_count"),
+                "strategy_stop_count": self._number(summary, "strategy_stop_count"),
+                "market_time_ns": self._number(summary, "market_time"),
+                "voluntary_wait_ns": self._number(summary, "voluntary_wait_ns"),
+                "charged_agent_time_ns": self._number(summary, "charged_agent_time_ns"),
+                "model_turn_count": max(
+                    self._number(summary, "model_turn_count"),
+                    float(observed_model_turns),
+                ),
+                "liquidation_failed": float(self._liquidation_failed(summary)),
+            }
+        )
+        metrics.update(
+            {
+                "prompt_tokens": float(prompt_tokens),
+                "completion_tokens": float(completion_tokens),
+                "cached_input_tokens": float(cached_input_tokens),
+                "reasoning_tokens": float(reasoning_tokens),
+            }
+        )
         if reported_costs:
             metrics["inference_cost"] = float(sum(reported_costs))
         return metrics
@@ -884,6 +917,7 @@ class AlphaversePropTask(AlphaverseTask):
         if self.config.toolset.url:
             if not self.data.join_episode_id:
                 raise RuntimeError("prop role requires a joined episode id")
+            await install_task_workspace(self.data, runtime)
             trace.state.episode_id = self.data.join_episode_id
             trace.state.participant_id = PROP_PARTICIPANT_ID
             return

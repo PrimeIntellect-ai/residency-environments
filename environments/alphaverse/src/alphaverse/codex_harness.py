@@ -1,4 +1,4 @@
-"""Codex ACP harness with the isolated Alphaverse player workspace."""
+"""Codex ACP transport restrictions and terminal artifact export."""
 
 from __future__ import annotations
 
@@ -13,19 +13,11 @@ from verifiers.v1.task import TaskData
 from verifiers.v1.trace import Trace
 
 from alphaverse.acp_harness import ArtifactExportSession
-from alphaverse.eval_harness import (
-    install_capture_session,
-    install_player_workspace,
-    install_role_workspace,
-)
+from alphaverse.eval_harness import install_capture_session
 
 
 class AlphaverseCodexHarness(CodexHarness):
-    """Codex plus the public player kit and episode capture credential."""
-
-    async def setup(self, runtime: Runtime) -> None:
-        await super().setup(runtime)
-        await install_player_workspace(runtime)
+    """Codex plus private capture transport and terminal artifact export."""
 
     async def prepare_acp(
         self,
@@ -37,7 +29,6 @@ class AlphaverseCodexHarness(CodexHarness):
         mcp_urls: dict[str, str],
         data: TaskData,
     ) -> ACPConfig:
-        await install_role_workspace(data, runtime)
         await install_capture_session(trace, runtime, mcp_urls)
         config = await super().prepare_acp(
             ctx,

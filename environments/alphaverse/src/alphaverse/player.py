@@ -714,7 +714,7 @@ class PlayerSession:
         return tuple(selected)
 
     def alert_status(self) -> dict[str, int | bool]:
-        """Expose the alert cursors needed by a hosted API integration."""
+        """Expose alert cursors needed by evaluator integrations."""
 
         latest = self._strategy.last_alert_cursor
         return {

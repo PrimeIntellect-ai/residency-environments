@@ -148,7 +148,7 @@ class EventLog:
         self._append_encoded(event, self._encode(event))
 
     def close(self) -> None:
-        """Release the backing file.  Called by hosted-episode cleanup."""
+        """Release the backing file."""
 
         if self._closed:
             return
@@ -160,8 +160,7 @@ class EventLog:
             pass
 
     def __del__(self) -> None:
-        # Best-effort cleanup for local, non-hosted episodes.  Explicit hosted
-        # cleanup is still used because destructor timing is not guaranteed.
+        # Best-effort cleanup when an owner does not call close() explicitly.
         try:
             self.close()
         except Exception:

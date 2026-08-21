@@ -370,7 +370,7 @@ def prop_role_readme(
     return readme
 
 
-# Backward-compatible defaults used by the original hosted path and reports.
+# Stable defaults used by the evaluator roster and research reports.
 PROP_BASELINE_SOURCE = prop_baseline_source("passive")
 PROP_SYSTEM_PROMPT = prop_system_prompt("incumbent")
 PROP_ROLE_README = prop_role_readme("passive", "incumbent")

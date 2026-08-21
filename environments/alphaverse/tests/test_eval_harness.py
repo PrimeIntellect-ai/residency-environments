@@ -7,8 +7,9 @@ from types import SimpleNamespace
 from alphaverse.acp_harness import ArtifactExportSession
 from alphaverse.claude_code_harness import AlphaverseClaudeCodeHarness
 from alphaverse.codex_harness import AlphaverseCodexHarness
-from alphaverse.eval_harness import AlphaverseHarness, install_role_workspace
+from alphaverse.eval_harness import AlphaverseHarness
 from alphaverse.verifiers_v1 import AlphaverseData
+from alphaverse.workspace import install_task_workspace
 from verifiers.v1.acp import ACPConfig
 from verifiers.v1.harnesses.bash import BashHarness, BashHarnessConfig
 from verifiers.v1.harnesses.claude_code import (
@@ -37,7 +38,7 @@ class _FakeRuntime:
         return "launched"
 
 
-def test_bash_plugin_resolves_and_installs_only_the_public_player_kit() -> None:
+def test_bash_plugin_resolves_without_owning_task_files() -> None:
     assert harness_class("alphaverse_eval_harness") is AlphaverseHarness
     runtime = _FakeRuntime()
     harness = AlphaverseHarness(BashHarnessConfig(id="alphaverse_eval_harness"))
@@ -45,6 +46,15 @@ def test_bash_plugin_resolves_and_installs_only_the_public_player_kit() -> None:
     asyncio.run(harness.setup(runtime))  # type: ignore[arg-type]
 
     assert runtime.prepared
+    assert runtime.files == {}
+
+
+def test_task_workspace_installs_only_the_public_player_kit() -> None:
+    runtime = _FakeRuntime()
+    data = AlphaverseData(idx=0, prompt="play", scenario_seed=7)
+
+    asyncio.run(install_task_workspace(data, runtime))  # type: ignore[arg-type]
+
     assert set(runtime.files) == {"README.md", "API.md", "market_capture.py"}
     assert b"cannot inspect the exchange implementation" in runtime.files["README.md"]
     assert b"deploy_strategy" in runtime.files["API.md"]
@@ -62,7 +72,7 @@ def test_prop_workspace_uses_configured_seed_and_framing() -> None:
         prop_framing="arbitrary",
     )
 
-    asyncio.run(install_role_workspace(data, runtime))  # type: ignore[arg-type]
+    asyncio.run(install_task_workspace(data, runtime))  # type: ignore[arg-type]
 
     assert b"inside-market starter" in runtime.files["ROLE.md"]
     assert b"arbitrary scaffolding" in runtime.files["ROLE.md"]
@@ -70,7 +80,7 @@ def test_prop_workspace_uses_configured_seed_and_framing() -> None:
     assert b"base_half_spread=3" not in runtime.files["strategy.py"]
 
 
-def test_codex_plugin_resolves_and_installs_only_the_public_player_kit(
+def test_codex_plugin_resolves_without_owning_task_files(
     monkeypatch,
 ) -> None:
     async def fake_setup(self, runtime):
@@ -83,8 +93,7 @@ def test_codex_plugin_resolves_and_installs_only_the_public_player_kit(
 
     asyncio.run(harness.setup(runtime))  # type: ignore[arg-type]
 
-    assert set(runtime.files) == {"README.md", "API.md", "market_capture.py"}
-    assert b"cannot inspect the exchange implementation" in runtime.files["README.md"]
+    assert runtime.files == {}
 
 
 def test_codex_prepare_acp_installs_capture_and_disables_web_search(
@@ -118,7 +127,7 @@ def test_codex_prepare_acp_installs_capture_and_disables_web_search(
     assert json.loads(config.env["CODEX_CONFIG"])["web_search"] == "disabled"
 
 
-def test_claude_code_plugin_resolves_and_installs_public_player_kit(
+def test_claude_code_plugin_resolves_without_owning_task_files(
     monkeypatch,
 ) -> None:
     async def fake_setup(self, runtime):
@@ -131,8 +140,7 @@ def test_claude_code_plugin_resolves_and_installs_public_player_kit(
 
     asyncio.run(harness.setup(runtime))  # type: ignore[arg-type]
 
-    assert set(runtime.files) == {"README.md", "API.md", "market_capture.py"}
-    assert b"cannot inspect the exchange implementation" in runtime.files["README.md"]
+    assert runtime.files == {}
 
 
 def test_launch_installs_episode_scoped_capture_configuration(monkeypatch) -> None:

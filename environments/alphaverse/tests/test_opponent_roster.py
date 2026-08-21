@@ -42,8 +42,6 @@ def test_runtime_instantiates_every_slot_in_a_versioned_roster(tmp_path) -> None
     runtime = EpisodeRuntime(
         EpisodeRuntimeConfig(
             episode_id="ep-roster-test",
-            capability_token="control-token",
-            capture_token="capture-token",
             scenario_seed=7,
             scenario_version="mvp-v1",
             opponent_roster_id="competitive-static-pair-v1",
@@ -53,7 +51,7 @@ def test_runtime_instantiates_every_slot_in_a_versioned_roster(tmp_path) -> None
     )
 
     assert runtime.opponent_roster is opponent_roster("competitive-static-pair-v1")
-    assert set(runtime.participant_credentials) == {"prop-a", "prop-b"}
+    assert {slot.participant_id for slot in runtime.opponent_roster.slots} == {"prop-a", "prop-b"}
     assert runtime.account(participant_id="prop-a")["participant_id"] == "prop-a"
     assert runtime.account(participant_id="prop-b")["participant_id"] == "prop-b"
 
@@ -62,8 +60,6 @@ def test_runtime_artifact_cross_marks_hidden_demand_profile(tmp_path) -> None:
     runtime = EpisodeRuntime(
         EpisodeRuntimeConfig(
             episode_id="ep-profile-artifact",
-            capability_token="control-token",
-            capture_token="capture-token",
             scenario_seed=7,
             scenario_version="endogenous-mixed-v1",
             latent_demand_profile="strong-long",

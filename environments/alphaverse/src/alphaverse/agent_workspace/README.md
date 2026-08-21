@@ -15,7 +15,7 @@ You cannot inspect the exchange implementation, participant code, latent
 signals, evaluator, or other hidden state. Do not assume their behavior. Infer
 market structure from the public feed and your own executions.
 
-The harness has no general internet access. Only the framework channels needed
+The runtime has no general internet access. Only the framework channels needed
 for model inference and the documented Alphaverse tools remain reachable. Do
 not depend on external websites, package registries, repositories, or services.
 

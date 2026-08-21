@@ -8,8 +8,6 @@ def test_episode_replay_verifies_and_projects_virtual_time(tmp_path) -> None:
     runtime = EpisodeRuntime(
         EpisodeRuntimeConfig(
             episode_id="ep-replay",
-            capability_token="control",
-            capture_token="capture",
             scenario_seed=9,
             scenario_version="mvp-v1",
             max_market_time_ns=2_000_000_000,

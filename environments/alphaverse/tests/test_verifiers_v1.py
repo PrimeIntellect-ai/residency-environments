@@ -21,7 +21,9 @@ def test_tool_annotations_register_with_fastmcp() -> None:
     server = FastMCP("alphaverse-schema-smoke")
     toolset.register(server)
 
-    assert len(server._tool_manager._tools) == 16
+    assert set(server._tool_manager._tools) == toolset._PUBLIC_TOOLS
+    assert "framework_channel" not in server._tool_manager._tools
+    assert any(route.path == "/alphaverse-framework" for route in server._custom_starlette_routes)
 
     prop = adapter.AlphaversePropToolset(adapter.AlphaverseToolsetConfig())
     prop_server = FastMCP("alphaverse-prop-schema-smoke")
@@ -35,6 +37,34 @@ def test_tool_annotations_register_with_fastmcp() -> None:
     knob_prop.register(knob_server)
     assert "deploy_strategy" in knob_server._tool_manager._tools
     assert "deploy_prop_knobs" not in knob_server._tool_manager._tools
+
+
+def test_framework_route_is_callable_without_mcp_discovery(monkeypatch) -> None:
+    from mcp.server.fastmcp import FastMCP
+    from starlette.testclient import TestClient
+
+    toolset = adapter.AlphaverseToolset(adapter.AlphaverseToolsetConfig())
+
+    async def fake_framework_request(capability: str, request: str):
+        return {"capability": capability, "request": request}
+
+    monkeypatch.setattr(toolset, "_framework_request", fake_framework_request)
+    monkeypatch.setattr(toolset, "_with_state", lambda fn: fn)
+    server = FastMCP("alphaverse-private-route-smoke")
+    toolset.register(server)
+
+    with TestClient(server.streamable_http_app()) as client:
+        response = client.post(
+            "/alphaverse-framework",
+            json={"capability": "secret", "request": '{"operation":"resume"}'},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "capability": "secret",
+        "request": '{"operation":"resume"}',
+    }
+    assert "framework_channel" not in server._tool_manager._tools
 
 
 def test_conversational_event_reads_are_bounded() -> None:
@@ -106,6 +136,11 @@ def test_alphaverse_data_rejects_widened_network_access() -> None:
             network_allow=["*"],
             network_block=[],
         )
+
+
+def test_task_config_rejects_unwired_token_time() -> None:
+    with pytest.raises(ValueError, match="time_mode"):
+        adapter.AlphaverseTaskConfig(time_mode="tokens")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("runtime_config", [DockerConfig(), PrimeConfig()])
@@ -225,15 +260,20 @@ def test_knob_prop_task_uses_bounded_tool_schema_and_prompt() -> None:
     assert "JSON knob document" in str(prop_task.data.system_prompt)
 
 
-def test_task_scoped_setup_and_finalize_keep_episode_inside_toolset() -> None:
+def test_task_scoped_setup_and_finalize_keep_episode_inside_toolset(monkeypatch) -> None:
     task = _task(adaptive_prop=True)
     trace = _trace(task)
+    installed: list[object] = []
+
+    async def fake_install(data, runtime):
+        installed.append(data)
+
+    monkeypatch.setattr(adapter, "install_task_workspace", fake_install)
 
     asyncio.run(task.setup(trace, None))  # type: ignore[arg-type]
 
+    assert installed == [task.data]
     assert trace.state.episode_id.startswith("ep_")
-    assert trace.state.capability_token
-    assert trace.state.capture_token
     assert trace.state.artifact_export_token
     assert trace.state.prop_access_token
     assert trace.state.coordination_token
@@ -266,8 +306,6 @@ def test_embedded_toolset_owns_episode_and_terminal_replay(tmp_path) -> None:
     )
     toolset._inert_state = adapter.AlphaverseState(
         episode_id="ep-embedded",
-        capability_token="control-secret",
-        capture_token="capture-secret",
     )
 
     async def run_episode():
@@ -310,8 +348,6 @@ def test_embedded_artifact_export_requires_hidden_terminal_capability(tmp_path) 
     )
     toolset._inert_state = adapter.AlphaverseState(
         episode_id="ep-export",
-        capability_token="control-secret",
-        capture_token="capture-secret",
         artifact_export_token="export-secret",
     )
 
@@ -326,11 +362,11 @@ def test_embedded_artifact_export_requires_hidden_terminal_capability(tmp_path) 
             }
         )
         with pytest.raises(PermissionError, match="invalid framework capability"):
-            await toolset.framework_channel(
+            await toolset._framework_request(
                 "wrong",
                 request,
             )
-        return await toolset.framework_channel(
+        return await toolset._framework_request(
             "export-secret",
             request,
         )
@@ -359,8 +395,6 @@ def test_embedded_prop_role_is_scoped_to_own_account_and_safe_tools(tmp_path, mo
     )
     toolset._inert_state = adapter.AlphaverseState(
         episode_id="ep-adaptive-embedded",
-        capability_token="player-control",
-        capture_token="player-capture",
         artifact_export_token="evaluator-secret",
         coordination_token="coordinator-secret",
         prop_access_token="prop-role-secret",
@@ -379,7 +413,7 @@ def test_embedded_prop_role_is_scoped_to_own_account_and_safe_tools(tmp_path, mo
             await toolset.submit_limit_order("forbidden", "buy", 10_000, 1)
         role_query.clear()
         await toolset.terminate_session()
-        summary = await toolset.framework_channel(
+        summary = await toolset._framework_request(
             "coordinator-secret",
             json.dumps(
                 {
@@ -420,8 +454,6 @@ def test_embedded_knob_prop_cannot_deploy_raw_source(tmp_path, monkeypatch) -> N
     )
     toolset._inert_state = adapter.AlphaverseState(
         episode_id="ep-knob-prop",
-        capability_token="player-control",
-        capture_token="player-capture",
         prop_access_token="prop-role-secret",
     )
     role_query = {
@@ -467,8 +499,6 @@ def test_embedded_tool_error_still_synchronizes_terminal_state(
     }
     toolset._inert_state = adapter.AlphaverseState(
         episode_id="ep-terminal-error",
-        capability_token="control",
-        capture_token="capture",
     )
     toolset._runtime = SimpleNamespace(sync_terminal=lambda: terminal)
 
@@ -519,3 +549,37 @@ def test_reward_does_not_penalize_pre_scoring_ok_state() -> None:
     }
 
     assert asyncio.run(task.realized_pnl(trace)) == pytest.approx(0.2)
+
+
+def test_reward_rejects_noncanonical_terminal_schema() -> None:
+    task = _task()
+    trace = _trace(task)
+    trace.info["alphaverse"] = {
+        "terminal_pnl": 2_000,
+        "position": 0,
+        "termination_state": "terminated",
+    }
+
+    with pytest.raises(KeyError, match="pnl"):
+        asyncio.run(task.realized_pnl(trace))
+
+    trace.info["alphaverse"] = {
+        "pnl": "2000",
+        "position": 0,
+        "termination_state": "terminated",
+    }
+    with pytest.raises(TypeError, match="must be numeric"):
+        asyncio.run(task.realized_pnl(trace))
+
+
+def test_incomplete_rollout_uses_only_the_liquidation_penalty() -> None:
+    task = _task()
+    trace = _trace(task)
+    trace.info["alphaverse"] = {
+        "pnl": 0,
+        "position": 0,
+        "termination_state": "incomplete",
+        "artifact_error": "episode did not terminate",
+    }
+
+    assert asyncio.run(task.realized_pnl(trace)) == -task.config.incomplete_liquidation_penalty

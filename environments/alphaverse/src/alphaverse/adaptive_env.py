@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import verifiers.v1 as vf
 from pydantic import Field
 
-from alphaverse.artifact_egress import call_mcp_tool
+from alphaverse.artifact_egress import call_framework, call_mcp_tool
 from alphaverse.opponent_roster import (
     OpponentRoster,
     legacy_prop_roster_id,
@@ -194,6 +193,18 @@ class AlphaverseAdaptiveEnv(vf.Env[AlphaverseAdaptiveEnvConfig]):
             raise RuntimeError("embedded evaluator control capability is unavailable")
         return token
 
+    @classmethod
+    async def _framework_call(
+        cls,
+        interaction,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await call_framework(
+            cls._embedded_toolset_url(interaction),
+            cls._coordinator_token(interaction),
+            request,
+        )
+
     async def _status(
         self,
         player,
@@ -300,15 +311,10 @@ class AlphaverseAdaptiveEnv(vf.Env[AlphaverseAdaptiveEnvConfig]):
             status = await self._status(player)
             if status.get("state") == "finalized":
                 break
-            await self._embedded_call(
+            await self._framework_call(
                 player,
-                "framework_channel",
                 {
-                    "capability": self._coordinator_token(player),
-                    "request": json.dumps(
-                        {"operation": "resume"},
-                        separators=(",", ":"),
-                    ),
+                    "operation": "resume",
                 },
             )
             player_segment = await player.turn(
@@ -319,18 +325,11 @@ class AlphaverseAdaptiveEnv(vf.Env[AlphaverseAdaptiveEnvConfig]):
             open_segments = 1
 
         if prop is not None and isinstance(player.trace.state.terminal_summary, dict):
-            prop_summary = await self._embedded_call(
+            prop_summary = await self._framework_call(
                 player,
-                "framework_channel",
                 {
-                    "capability": self._coordinator_token(player),
-                    "request": json.dumps(
-                        {
-                            "operation": "participant_result",
-                            "participant_id": prop_participant_id,
-                        },
-                        separators=(",", ":"),
-                    ),
+                    "operation": "participant_result",
+                    "participant_id": prop_participant_id,
                 },
             )
             prop_summary["shared_episode_trace_id"] = player.trace.id

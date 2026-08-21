@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from alphaverse.hosted import EpisodeMetrics
+from alphaverse.episode_state import EpisodeMetrics
 from alphaverse.observability import build_observability_snapshot
 from alphaverse.player import PlayerSession
 

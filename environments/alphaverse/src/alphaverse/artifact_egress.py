@@ -14,6 +14,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 from alphaverse.replay import EpisodeReplay
 
+FRAMEWORK_ROUTE = "/alphaverse-framework"
+
 
 def _host_url(url: str) -> str:
     """Translate Docker Desktop's agent-facing host alias back to host loopback."""
@@ -69,6 +71,25 @@ async def call_mcp_tool(url: str, name: str, arguments: dict[str, Any]) -> dict[
     if not isinstance(decoded, dict):
         raise RuntimeError("artifact MCP tool returned a non-object payload")
     return decoded
+
+
+async def call_framework(
+    mcp_url: str,
+    capability: str,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    """Call the evaluator-only route without advertising an MCP tool."""
+
+    parts = urlsplit(_host_url(mcp_url))
+    url = urlunsplit(parts._replace(path=FRAMEWORK_ROUTE))
+    return await asyncio.to_thread(
+        _request_json,
+        url,
+        {
+            "capability": capability,
+            "request": json.dumps(request, separators=(",", ":")),
+        },
+    )
 
 
 async def export_terminal_artifacts(
@@ -135,20 +156,14 @@ async def export_terminal_artifacts(
             offset = 0
             with temporary.open("wb") as stream:
                 while offset < expected_bytes:
-                    chunk = await call_mcp_tool(
+                    chunk = await call_framework(
                         url,
-                        "framework_channel",
+                        export_token,
                         {
-                            "capability": export_token,
-                            "request": json.dumps(
-                                {
-                                    "operation": "artifact_chunk",
-                                    "path": name,
-                                    "offset": offset,
-                                    "max_bytes": chunk_bytes,
-                                },
-                                separators=(",", ":"),
-                            ),
+                            "operation": "artifact_chunk",
+                            "path": name,
+                            "offset": offset,
+                            "max_bytes": chunk_bytes,
                         },
                     )
                     encoded = chunk.get("data")
@@ -186,4 +201,9 @@ async def export_terminal_artifacts(
     return destination
 
 
-__all__ = ["call_mcp_tool", "export_terminal_artifacts"]
+__all__ = [
+    "FRAMEWORK_ROUTE",
+    "call_framework",
+    "call_mcp_tool",
+    "export_terminal_artifacts",
+]
