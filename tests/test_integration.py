@@ -58,7 +58,6 @@ def test_eval(env_dir: Path, tmp_path: Path):
 
     command = [
         str(venv / "bin" / "eval"),
-        "--taskset.id",
         env_dir.name,
         "-m",
         "openai/gpt-4.1-mini",
@@ -70,12 +69,12 @@ def test_eval(env_dir: Path, tmp_path: Path):
         "1",
         "-r",
         "2",
-        "--max-turns",
+        "--env.agent.max-turns",
         "4",
         "--sampling.max-tokens",
         "512",
-        "--rich",
-        "false",
+        "--no-rich",
+        "--no-push",
     ]
     try:
         evaluation = subprocess.run(
