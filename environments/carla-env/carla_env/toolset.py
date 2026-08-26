@@ -14,14 +14,22 @@ from .nurec import normalize_nurec_mode
 from .v1 import CarlaState, CarlaTaskData
 
 
+def _config_value(config: object, name: str, default: object = None) -> object:
+    if isinstance(config, dict):
+        return config.get(name, default)
+    return getattr(config, name, default)
+
+
 def _enabled_tools(data: CarlaTaskData) -> set[str]:
     scenario = data.scenario
     args = data.env_args
-    nurec = args.get("nurec") if isinstance(args.get("nurec"), dict) else {}
-    cosmos = args.get("cosmos") if isinstance(args.get("cosmos"), dict) else {}
-    nurec_enabled = bool(args.get("enable_nurec") or nurec.get("enabled"))
-    nurec_mode = normalize_nurec_mode(args.get("nurec_mode") or nurec.get("mode") or "replay")
-    cosmos_enabled = bool(args.get("enable_cosmos") or cosmos.get("enabled"))
+    nurec = args.get("nurec")
+    cosmos = args.get("cosmos")
+    nurec_enabled = bool(args.get("enable_nurec") or _config_value(nurec, "enabled", False))
+    nurec_mode = normalize_nurec_mode(
+        args.get("nurec_mode") or _config_value(nurec, "mode", "replay")
+    )
+    cosmos_enabled = bool(args.get("enable_cosmos") or _config_value(cosmos, "enabled", False))
     vision_enabled = bool(
         args.get("enable_vision")
         or scenario.startswith("navigation_vision")
@@ -107,7 +115,7 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
         )
         session = load_environment(scenario=self._task_data.scenario, **args)
         session_state: dict[str, Any] = {}
-        await session.setup_state(session_state)
+        await session.setup_state(session_state, external_endpoint_reserved=True)
         self._session = session
         self._session_state = session_state
         prompt = session_state.get("prompt") or []

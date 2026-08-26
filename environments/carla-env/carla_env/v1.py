@@ -18,6 +18,7 @@ class CarlaState(vf.State):
     endpoint_port: int | None = None
     endpoint_reserved: bool = False
     sandbox_id: str | None = None
+    sandbox_lease_id: str | None = None
     carla_version: str = ""
     traffic_manager_enabled: bool = False
     done: bool = False
@@ -63,6 +64,7 @@ class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
         state.traffic_manager_enabled = bool(session.config.traffic_manager_enabled)
         reservation = lease.get("_sandbox_reservation")
         state.sandbox_id = reservation.sandbox_id if reservation is not None else None
+        state.sandbox_lease_id = reservation.lease_id if reservation is not None else None
 
     async def finalize(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
         del runtime
@@ -80,11 +82,13 @@ class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
                 sandbox_id=state.sandbox_id,
                 host=state.endpoint_host,
                 port=state.endpoint_port,
+                lease_id=state.sandbox_lease_id or "",
             )
         try:
             await session.release_endpoint(lease)
         finally:
             state.endpoint_reserved = False
+            state.sandbox_lease_id = None
 
     @vf.stop
     def scenario_done(self, trace: vf.Trace) -> bool:

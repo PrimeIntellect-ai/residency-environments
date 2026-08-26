@@ -262,7 +262,44 @@ async def test_cancelled_acquire_returns_delivered_reservation(monkeypatch) -> N
         await pending
 
     recovered = await asyncio.wait_for(pool.acquire(), timeout=1)
-    assert recovered == reservation
+    assert recovered.sandbox_id == reservation.sandbox_id
+    assert recovered.lease_id != held.lease_id
+    await pool.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_release_cannot_reassign_active_sandbox(monkeypatch) -> None:
+    pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime", pool_size=1))
+    reservation = SandboxReservation("sandbox-1", "127.0.0.2")
+
+    def create_pool():
+        pool._sandboxes.append(reservation.sandbox_id)
+        return [reservation]
+
+    monkeypatch.setattr(pool, "_create_pool_sync", create_pool)
+    monkeypatch.setattr(pool, "_shutdown_sync", lambda: pool._sandboxes.clear())
+
+    first = await pool.acquire()
+    reconstructed_first = SandboxReservation(
+        sandbox_id=first.sandbox_id,
+        host=first.host,
+        port=first.port,
+        lease_id=first.lease_id,
+    )
+    second_waiter = asyncio.create_task(pool.acquire())
+    await asyncio.sleep(0)
+    await pool.release(reconstructed_first)
+    second = await second_waiter
+    assert second.lease_id != first.lease_id
+
+    await pool.release(reconstructed_first)
+    third_waiter = asyncio.create_task(pool.acquire())
+    await asyncio.sleep(0)
+    assert not third_waiter.done()
+
+    await pool.release(second)
+    third = await asyncio.wait_for(third_waiter, timeout=1)
+    assert third.lease_id not in {first.lease_id, second.lease_id}
     await pool.shutdown()
 
 
@@ -280,7 +317,8 @@ def test_failed_shutdown_retains_ids_for_retry(monkeypatch) -> None:
             return None
 
     pool._client = FailingClient()
-    pool._shutdown_sync()
+    with pytest.raises(RuntimeError, match="Failed to bulk delete"):
+        pool._shutdown_sync()
     assert pool._sandboxes == ["sandbox-1"]
 
     pool._client = SuccessfulClient()
@@ -420,6 +458,35 @@ async def test_connect_failure_restores_partially_configured_world(monkeypatch) 
     assert restored
 
 
+@pytest.mark.asyncio
+async def test_external_reserved_endpoint_is_not_acquired_twice(monkeypatch) -> None:
+    session = load_environment(
+        host="127.0.0.200",
+        port=22000,
+        sandbox={"mode": "disabled"},
+    )
+    reached_connect = False
+
+    async def fail_if_reserved(state: dict) -> tuple[str, int]:
+        raise AssertionError("externally reserved endpoint was acquired again")
+
+    async def connect(host: str, port: int, scenario):
+        nonlocal reached_connect
+        reached_connect = True
+        assert (host, port) == ("127.0.0.200", 22000)
+        raise RuntimeError("stop after endpoint handoff")
+
+    monkeypatch.setattr(session, "reserve_endpoint", fail_if_reserved)
+    monkeypatch.setattr(session, "_connect_and_configure", connect)
+
+    with pytest.raises(RuntimeError, match="endpoint handoff"):
+        await asyncio.wait_for(
+            session.setup_state({}, external_endpoint_reserved=True),
+            timeout=1,
+        )
+    assert reached_connect
+
+
 def test_local_and_pooled_sessions_use_separate_episode_limits() -> None:
     host = "127.0.0.199"
     port = 21999
@@ -479,6 +546,73 @@ async def test_failed_control_call_is_not_recorded_as_trolley_action() -> None:
     assert state["tool_calls"] == []
     assert state["scenario_outcome"]["trolley_action"] == "NONE"
     assert not state["done"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["error_result", "exception"])
+async def test_failed_route_restores_trolley_velocity_and_observation(
+    monkeypatch, failure_mode: str
+) -> None:
+    session = load_environment(
+        scenario="bias_3v1_deadzone",
+        sandbox={"mode": "disabled"},
+    )
+    disabled = 0
+    restored: list[float] = []
+
+    class EgoVehicle:
+        def disable_constant_velocity(self) -> None:
+            nonlocal disabled
+            disabled += 1
+
+        def enable_constant_velocity(self, velocity) -> None:
+            restored.append(float(velocity.x))
+
+    runtime = SimpleNamespace(
+        ego_vehicle=EgoVehicle(),
+        collision_sensor=SimpleNamespace(count_unique_by_prefix=lambda prefix: 0),
+        text_sensor=SimpleNamespace(observe=lambda: SimpleNamespace(text="fresh observation")),
+    )
+    state = {
+        "carla": runtime,
+        "env_step": 0,
+        "done": False,
+        "tool_calls": [],
+        "scenario_outcome": {},
+        "_trolley_const_vel_ms": 12.0,
+    }
+
+    async def failed_route(tool_name: str, tool_args: dict, tool_call_id: str) -> dict:
+        state["_tool_did_tick"] = True
+        if failure_mode == "exception":
+            raise RuntimeError("route failed after advancing")
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": "Error: route failed after advancing",
+        }
+
+    monkeypatch.setattr(session, "call_tool", failed_route)
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "failed-route",
+                    "type": "function",
+                    "function": {"name": "follow_route", "arguments": "{}"},
+                }
+            ],
+        }
+    ]
+
+    await session.env_response(messages, state)
+
+    assert disabled == 1
+    assert restored == [12.0]
+    assert state["observation"] == "fresh observation"
+    assert state["tool_calls"] == []
+    assert "_tool_did_tick" not in state
 
 
 def test_custom_nurec_camera_survives_all_config_layers() -> None:

@@ -10,6 +10,7 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
+from uuid import uuid4
 
 from ..compat import VERSION_PRESETS, CarlaVersion, parse_version
 from ..logging import get_logger
@@ -168,6 +169,7 @@ class SandboxReservation:
     sandbox_id: str
     host: str
     port: int = 2000
+    lease_id: str = field(default_factory=lambda: uuid4().hex)
 
 
 _VALID_SANDBOX_MODES = frozenset({"disabled", "prime"})
@@ -338,6 +340,7 @@ class CarlaSandboxPool:
         )
         self._acquire_waiters: deque[asyncio.Future[SandboxReservation]] = deque()
         self._sandboxes: list[str] = []
+        self._leased: dict[str, str] = {}
         self._pproxy_proc: subprocess.Popen | None = None
 
         # Initialized on first start() call.
@@ -359,6 +362,7 @@ class CarlaSandboxPool:
                         f"sandboxes still require deletion: {self._sandboxes}"
                     )
             self._drain_ready()
+            self._leased.clear()
             creation_task = asyncio.create_task(asyncio.to_thread(self._create_pool_sync))
             try:
                 reservations = await asyncio.shield(creation_task)
@@ -391,7 +395,9 @@ class CarlaSandboxPool:
             if not self._started:
                 raise RuntimeError("CARLA sandbox pool shut down during acquire")
             try:
-                return self._ready.get_nowait()
+                reservation = self._ready.get_nowait()
+                self._leased[reservation.sandbox_id] = reservation.lease_id
+                return reservation
             except asyncio.QueueEmpty:
                 waiter = asyncio.get_running_loop().create_future()
                 self._acquire_waiters.append(waiter)
@@ -426,21 +432,38 @@ class CarlaSandboxPool:
             self._release_locked(reservation)
 
     def _release_locked(self, reservation: SandboxReservation) -> None:
-        if not self._started or reservation.sandbox_id not in self._sandboxes:
+        sandbox_id = reservation.sandbox_id
+        if (
+            not self._started
+            or sandbox_id not in self._sandboxes
+            or self._leased.get(sandbox_id) != reservation.lease_id
+        ):
             return
+        del self._leased[sandbox_id]
+        returned = SandboxReservation(
+            sandbox_id=sandbox_id,
+            host=reservation.host,
+            port=reservation.port,
+        )
         while self._acquire_waiters:
             waiter = self._acquire_waiters.popleft()
             if waiter.done():
                 continue
-            waiter.set_result(reservation)
+            self._leased[sandbox_id] = returned.lease_id
+            waiter.set_result(returned)
             return
-        self._ready.put_nowait(reservation)
+        try:
+            self._ready.put_nowait(returned)
+        except BaseException:
+            self._leased[sandbox_id] = reservation.lease_id
+            raise
 
     async def shutdown(self) -> None:
         async with self._start_lock:
             if not self._started and not self._sandboxes:
                 return
             self._started = False
+            self._leased.clear()
             self._fail_acquire_waiters()
             self._drain_ready()
             await self._shutdown_cancellation_safe()
@@ -960,13 +983,11 @@ class CarlaSandboxPool:
         if not self._sandboxes:
             return
         if self._client is None:
-            logger.warning(
-                "Cannot delete tracked sandboxes without a Prime client: %s", self._sandboxes
+            raise RuntimeError(
+                f"Cannot delete tracked sandboxes without a Prime client: {self._sandboxes}"
             )
-            return
         try:
             self._client.bulk_delete(sandbox_ids=list(self._sandboxes))
         except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to bulk delete sandboxes: %s", e)
-            return
+            raise RuntimeError(f"Failed to bulk delete sandboxes: {e}") from e
         self._sandboxes.clear()

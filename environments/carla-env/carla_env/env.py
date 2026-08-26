@@ -1167,6 +1167,17 @@ class CarlaEnv:
             return
         runtime.tick(int(ticks))
 
+    @staticmethod
+    def _restore_trolley_constant_velocity(runtime: CarlaRuntime, state: State) -> None:
+        velocity = state.get("_trolley_const_vel_ms")
+        if isinstance(velocity, (int, float)) and velocity > 0:
+            try:
+                runtime.ego_vehicle.enable_constant_velocity(
+                    carla.Vector3D(x=float(velocity), y=0.0, z=0.0)
+                )
+            except Exception:
+                pass
+
     def _update_nurec_replay_outcome(self, scenario: BaseScenario, state: State) -> None:
         if not bool(state.get("_nurec_skip_goal_scoring", False)):
             return
@@ -1508,8 +1519,17 @@ class CarlaEnv:
             except Exception:
                 pass
 
-    async def setup_state(self, state: State, **kwargs) -> State:
-        host, port = await self.reserve_endpoint(state)
+    async def setup_state(
+        self,
+        state: State,
+        *,
+        external_endpoint_reserved: bool = False,
+        **kwargs,
+    ) -> State:
+        if external_endpoint_reserved:
+            host, port = self.config.host, self.config.port
+        else:
+            host, port = await self.reserve_endpoint(state)
 
         client: CarlaClient | None = None
         world_mgr: WorldManager | None = None
@@ -1785,6 +1805,10 @@ class CarlaEnv:
             # Constant velocity is useful for trolley dilemmas (prevents "escape" via braking).
             # Only disable it for tools that need full speed-control authority (navigation agent).
             disable_const_vel_tools = {"follow_route"}
+            restore_const_vel = isinstance(scenario, TrolleyMicroScenario) or (
+                isinstance(scenario, ActionBiasScenario)
+                and bool(getattr(scenario.config, "deadzone", False))
+            )
             if tool_name in disable_const_vel_tools:
                 try:
                     runtime.ego_vehicle.disable_constant_velocity()
@@ -1863,6 +1887,8 @@ class CarlaEnv:
                 if bool(state.get("_tool_did_tick", False)):
                     turn_advanced_time = True
                 state.pop("_tool_did_tick", None)
+                if restore_const_vel and tool_name in disable_const_vel_tools:
+                    self._restore_trolley_constant_velocity(runtime, state)
                 tool_messages.append(
                     {"role": "tool", "tool_call_id": tool_call_id, "content": f"Tool error: {e}"}
                 )
@@ -1870,29 +1896,19 @@ class CarlaEnv:
 
             tool_messages.append(tool_message)
             if self._tool_message_is_error(tool_message):
+                if bool(state.get("_tool_did_tick", False)):
+                    turn_advanced_time = True
                 state.pop("_tool_did_tick", None)
+                if restore_const_vel and tool_name in disable_const_vel_tools:
+                    self._restore_trolley_constant_velocity(runtime, state)
                 continue
             state["tool_calls"].append({"name": tool_name, "args": dict(parsed)})
 
             # Restore constant velocity after motion tools to prevent braking from
             # bypassing the dilemma.
-            restore_const_vel = False
-            if isinstance(scenario, TrolleyMicroScenario):
-                restore_const_vel = True
-            elif isinstance(scenario, ActionBiasScenario):
-                restore_const_vel = bool(getattr(scenario.config, "deadzone", False))
-
             # Re-enable constant velocity after tools that temporarily disabled it.
             if restore_const_vel and tool_name in disable_const_vel_tools:
-                v = state.get("_trolley_const_vel_ms")
-                if isinstance(v, (int, float)) and v and v > 0:
-                    try:
-                        # Constant velocity uses a local-frame vector.
-                        runtime.ego_vehicle.enable_constant_velocity(
-                            carla.Vector3D(x=float(v), y=0.0, z=0.0)
-                        )
-                    except Exception:
-                        pass
+                self._restore_trolley_constant_velocity(runtime, state)
 
             # Tools that advanced time internally skip default post-tool ticks, but
             # scenarios may still request additional settle ticks.
