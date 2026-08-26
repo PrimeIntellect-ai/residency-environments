@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import sys
 import threading
 from types import ModuleType, SimpleNamespace
@@ -108,6 +109,47 @@ def _fake_ready_pool(monkeypatch, coordinator, *, attempts: int) -> CarlaSandbox
 def test_port_probe_rejects_non_loopback_addresses() -> None:
     with pytest.raises(ValueError, match="127.0.0.0/8"):
         _find_available_loopback_ips(1, ports=(), base_ip="0.0.0.0")
+
+
+def test_internal_readiness_command_uses_bounded_timeout() -> None:
+    timeouts: list[int | None] = []
+
+    class Client:
+        def execute_command(self, sandbox_id: str, command: str, *, timeout: int | None = None):
+            timeouts.append(timeout)
+            return SimpleNamespace(stdout="OK")
+
+    CarlaSandboxPool._wait_internal_carla(Client(), "sandbox-1", 2000, timeout_s=7)
+
+    assert timeouts == [pytest.approx(7, abs=1)]
+
+
+def test_proxy_kill_is_followed_by_wait() -> None:
+    class Proxy:
+        def __init__(self) -> None:
+            self.wait_calls = 0
+            self.killed = False
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: int) -> None:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise subprocess.TimeoutExpired("pproxy", timeout)
+
+        def kill(self) -> None:
+            self.killed = True
+
+    pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime"))
+    proxy = Proxy()
+    pool._pproxy_proc = proxy
+
+    pool._stop_pproxy()
+
+    assert proxy.killed
+    assert proxy.wait_calls == 2
+    assert pool._pproxy_proc is None
 
 
 @pytest.mark.asyncio

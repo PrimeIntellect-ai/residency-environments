@@ -988,20 +988,31 @@ class CarlaSandboxPool:
                 self._pproxy_proc.kill()
             except Exception:
                 pass
+            else:
+                try:
+                    self._pproxy_proc.wait(timeout=10)
+                except Exception:
+                    pass
         self._pproxy_proc = None
 
     @staticmethod
     def _wait_internal_carla(client, sandbox_id: str, port: int, timeout_s: int) -> None:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
-            res = client.execute_command(
-                sandbox_id,
-                'python3 -c "import socket; s=socket.socket(); s.settimeout(2); '
-                f's.connect((\\"127.0.0.1\\", {port})); s.close(); print(\\"OK\\")"',
-            )
-            if "OK" in (res.stdout or ""):
-                return
-            time.sleep(5)
+            remaining_s = max(1, int(deadline - time.time()))
+            try:
+                res = client.execute_command(
+                    sandbox_id,
+                    'python3 -c "import socket; s=socket.socket(); s.settimeout(2); '
+                    f's.connect((\\"127.0.0.1\\", {port})); s.close(); print(\\"OK\\")"',
+                    timeout=min(10, remaining_s),
+                )
+            except Exception:
+                pass
+            else:
+                if "OK" in (res.stdout or ""):
+                    return
+            time.sleep(min(5, max(0, deadline - time.time())))
         logger.warning("CARLA did not become ready in sandbox %s within %ss", sandbox_id, timeout_s)
 
     def _shutdown_sync(self) -> None:

@@ -26,13 +26,15 @@ def _enabled_tools(data: CarlaTaskData) -> set[str]:
     nurec = args.get("nurec")
     cosmos = args.get("cosmos")
     nurec_enabled = bool(args.get("enable_nurec") or _config_value(nurec, "enabled", False))
+    nurec_mode_arg = args.get("nurec_mode")
     nurec_mode = normalize_nurec_mode(
-        args.get("nurec_mode") or _config_value(nurec, "mode", "replay")
+        _config_value(nurec, "mode", "replay") if nurec_mode_arg is None else nurec_mode_arg
     )
     cosmos_enabled = bool(args.get("enable_cosmos") or _config_value(cosmos, "enabled", False))
+    vision_override = args.get("enable_vision")
+    scenario_vision = scenario.startswith(("navigation_vision", "free_roam"))
     vision_enabled = bool(
-        args.get("enable_vision")
-        or scenario.startswith(("navigation_vision", "free_roam"))
+        (scenario_vision if vision_override is None else vision_override)
         or nurec_enabled
         or cosmos_enabled
     )

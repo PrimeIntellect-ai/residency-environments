@@ -51,6 +51,15 @@ def test_taskset_builds_native_v1_task() -> None:
         ),
         (
             "navigation_vision",
+            {
+                "nurec": NuRecConfig(enabled=True, mode="drive"),
+                "nurec_mode": "",
+            },
+            {"observe", "capture_image"},
+            {"control_vehicle", "get_goal_info"},
+        ),
+        (
+            "navigation_vision",
             {"enable_cosmos": True},
             {"capture_image", "capture_depth"},
             {"observe"},
@@ -66,6 +75,12 @@ def test_taskset_builds_native_v1_task() -> None:
             {},
             {"capture_image", "control_vehicle", "observe"},
             {"capture_depth", "get_goal_info"},
+        ),
+        (
+            "free_roam_Town10HD_v1_p1",
+            {"enable_vision": False},
+            {"control_vehicle", "observe"},
+            {"capture_image", "capture_depth", "get_goal_info"},
         ),
     ],
 )
