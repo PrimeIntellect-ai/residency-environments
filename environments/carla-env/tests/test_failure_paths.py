@@ -1,9 +1,11 @@
 import asyncio
 import sys
+import threading
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from carla_env.compat import CarlaVersion
 from carla_env.env import CarlaEnvConfig, _resolve_nurec_config, load_environment
 from carla_env.nurec import DEFAULT_NUREC_CAMERA_LOGICAL_ID, NuRecConfig
 from carla_env.sandbox import pool as pool_module
@@ -123,6 +125,120 @@ async def test_pool_can_restart_after_shutdown(monkeypatch) -> None:
     assert pool._ready.qsize() == 1
 
 
+@pytest.mark.asyncio
+async def test_shutdown_waits_for_inflight_start(monkeypatch) -> None:
+    pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime", pool_size=1))
+    reservation = SandboxReservation("sandbox-1", "127.0.0.2")
+    creation_started = threading.Event()
+    allow_creation = threading.Event()
+    deleted: list[str] = []
+
+    def create_pool():
+        creation_started.set()
+        assert allow_creation.wait(timeout=5)
+        pool._sandboxes.append(reservation.sandbox_id)
+        return [reservation]
+
+    def shutdown_pool():
+        deleted.extend(pool._sandboxes)
+        pool._sandboxes.clear()
+
+    monkeypatch.setattr(pool, "_create_pool_sync", create_pool)
+    monkeypatch.setattr(pool, "_shutdown_sync", shutdown_pool)
+
+    start_task = asyncio.create_task(pool.start())
+    assert await asyncio.to_thread(creation_started.wait, 5)
+    shutdown_task = asyncio.create_task(pool.shutdown())
+    await asyncio.sleep(0)
+    assert not shutdown_task.done()
+
+    allow_creation.set()
+    await start_task
+    await shutdown_task
+
+    assert deleted == ["sandbox-1"]
+    assert not pool._started
+
+
+@pytest.mark.asyncio
+async def test_shutdown_fails_pending_acquire(monkeypatch) -> None:
+    pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime", pool_size=1))
+    reservation = SandboxReservation("sandbox-1", "127.0.0.2")
+
+    def create_pool():
+        pool._sandboxes.append(reservation.sandbox_id)
+        return [reservation]
+
+    monkeypatch.setattr(pool, "_create_pool_sync", create_pool)
+    monkeypatch.setattr(pool, "_shutdown_sync", lambda: pool._sandboxes.clear())
+
+    held = await pool.acquire()
+    pending = asyncio.create_task(pool.acquire())
+    await asyncio.sleep(0)
+    await pool.shutdown()
+
+    with pytest.raises(RuntimeError, match="shut down"):
+        await pending
+    assert held == reservation
+
+
+@pytest.mark.asyncio
+async def test_cancelled_start_waits_for_creation_and_cleans_up(monkeypatch) -> None:
+    pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime", pool_size=1))
+    reservation = SandboxReservation("sandbox-1", "127.0.0.2")
+    creation_started = threading.Event()
+    allow_creation = threading.Event()
+    deleted: list[str] = []
+
+    def create_pool():
+        creation_started.set()
+        assert allow_creation.wait(timeout=5)
+        pool._sandboxes.append(reservation.sandbox_id)
+        return [reservation]
+
+    def shutdown_pool():
+        deleted.extend(pool._sandboxes)
+        pool._sandboxes.clear()
+
+    monkeypatch.setattr(pool, "_create_pool_sync", create_pool)
+    monkeypatch.setattr(pool, "_shutdown_sync", shutdown_pool)
+
+    start_task = asyncio.create_task(pool.start())
+    assert await asyncio.to_thread(creation_started.wait, 5)
+    start_task.cancel()
+    allow_creation.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await start_task
+    assert deleted == ["sandbox-1"]
+    assert not pool._started
+
+
+@pytest.mark.asyncio
+async def test_release_rejects_reservation_from_previous_generation(monkeypatch) -> None:
+    pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime", pool_size=1))
+    reservations = [
+        SandboxReservation("sandbox-old", "127.0.0.2"),
+        SandboxReservation("sandbox-new", "127.0.0.3"),
+    ]
+
+    def create_pool():
+        reservation = reservations.pop(0)
+        pool._sandboxes.append(reservation.sandbox_id)
+        return [reservation]
+
+    monkeypatch.setattr(pool, "_create_pool_sync", create_pool)
+    monkeypatch.setattr(pool, "_shutdown_sync", lambda: pool._sandboxes.clear())
+
+    old = await pool.acquire()
+    await pool.shutdown()
+    await pool.start()
+    await pool.release(old)
+
+    current = await pool.acquire()
+    assert current.sandbox_id == "sandbox-new"
+
+
 def test_failed_shutdown_retains_ids_for_retry(monkeypatch) -> None:
     pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime"))
     pool._sandboxes = ["sandbox-1"]
@@ -238,6 +354,43 @@ async def test_cleanup_cancellation_still_releases_endpoint(monkeypatch) -> None
         await session.cleanup(state)
 
     assert released
+
+
+@pytest.mark.asyncio
+async def test_connect_failure_restores_partially_configured_world(monkeypatch) -> None:
+    from carla_env import env as env_module
+
+    restored = False
+
+    class FakeClient:
+        def __init__(self, config):
+            self.config = config
+            self.carla_version = CarlaVersion.V0_10_0
+
+        async def connect_async(self):
+            return None
+
+    class FakeWorldManager:
+        def __init__(self, client, config):
+            self.client = client
+            self.config = config
+
+        def configure(self, map_name=None):
+            raise RuntimeError("configuration failed after changing the world")
+
+        def restore(self):
+            nonlocal restored
+            restored = True
+
+    monkeypatch.setattr(env_module, "CarlaClient", FakeClient)
+    monkeypatch.setattr(env_module, "WorldManager", FakeWorldManager)
+    monkeypatch.setattr(env_module, "detect_client_version", lambda: None)
+    session = load_environment(sandbox={"mode": "disabled"})
+
+    with pytest.raises(RuntimeError, match="configuration failed"):
+        await session._connect_and_configure("127.0.0.1", 2000, session.scenario)
+
+    assert restored
 
 
 def test_custom_nurec_camera_survives_all_config_layers() -> None:

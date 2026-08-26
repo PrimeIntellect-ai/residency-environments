@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
 
@@ -335,6 +336,7 @@ class CarlaSandboxPool:
         self._ready: asyncio.Queue[SandboxReservation] = asyncio.Queue(
             maxsize=max(1, int(config.pool_size))
         )
+        self._acquire_waiters: deque[asyncio.Future[SandboxReservation]] = deque()
         self._sandboxes: list[str] = []
         self._pproxy_proc: subprocess.Popen | None = None
 
@@ -350,14 +352,24 @@ class CarlaSandboxPool:
             if self.config.mode == "disabled":
                 raise RuntimeError("Sandbox pool is disabled (mode='disabled')")
             if self._sandboxes:
-                await asyncio.to_thread(self._shutdown_sync)
+                await self._shutdown_cancellation_safe()
                 if self._sandboxes:
                     raise RuntimeError(
                         "Cannot start a new CARLA sandbox pool while previously created "
                         f"sandboxes still require deletion: {self._sandboxes}"
                     )
             self._drain_ready()
-            reservations = await asyncio.to_thread(self._create_pool_sync)
+            creation_task = asyncio.create_task(asyncio.to_thread(self._create_pool_sync))
+            try:
+                reservations = await asyncio.shield(creation_task)
+            except asyncio.CancelledError:
+                try:
+                    await creation_task
+                except BaseException:
+                    pass
+                self._drain_ready()
+                await self._shutdown_cancellation_safe()
+                raise
             if not reservations:
                 # Prevent acquire() from deadlocking on an empty ready queue.
                 raise RuntimeError(
@@ -370,27 +382,65 @@ class CarlaSandboxPool:
                 self._started = True
             except BaseException:
                 self._drain_ready()
-                await asyncio.to_thread(self._shutdown_sync)
+                await self._shutdown_cancellation_safe()
                 raise
 
     async def acquire(self) -> SandboxReservation:
         await self.start()
-        return await self._ready.get()
+        async with self._start_lock:
+            if not self._started:
+                raise RuntimeError("CARLA sandbox pool shut down during acquire")
+            try:
+                return self._ready.get_nowait()
+            except asyncio.QueueEmpty:
+                waiter = asyncio.get_running_loop().create_future()
+                self._acquire_waiters.append(waiter)
+        try:
+            return await waiter
+        finally:
+            if not waiter.done():
+                waiter.cancel()
+            try:
+                self._acquire_waiters.remove(waiter)
+            except ValueError:
+                pass
 
     async def release(self, reservation: SandboxReservation) -> None:
-        if not self._started:
-            return
-        await self._ready.put(reservation)
+        async with self._start_lock:
+            if not self._started or reservation.sandbox_id not in self._sandboxes:
+                return
+            while self._acquire_waiters:
+                waiter = self._acquire_waiters.popleft()
+                if waiter.done():
+                    continue
+                waiter.set_result(reservation)
+                return
+            self._ready.put_nowait(reservation)
 
     async def shutdown(self) -> None:
-        if not self._started and not self._sandboxes:
-            return
         async with self._start_lock:
             if not self._started and not self._sandboxes:
                 return
             self._started = False
+            self._fail_acquire_waiters()
             self._drain_ready()
-            await asyncio.to_thread(self._shutdown_sync)
+            await self._shutdown_cancellation_safe()
+
+    async def _shutdown_cancellation_safe(self) -> None:
+        shutdown_task = asyncio.create_task(asyncio.to_thread(self._shutdown_sync))
+        try:
+            await asyncio.shield(shutdown_task)
+        except asyncio.CancelledError:
+            await shutdown_task
+            raise
+
+    def _fail_acquire_waiters(self) -> None:
+        while self._acquire_waiters:
+            waiter = self._acquire_waiters.popleft()
+            if not waiter.done():
+                waiter.set_exception(
+                    RuntimeError("CARLA sandbox pool shut down while waiting for a reservation")
+                )
 
     def _drain_ready(self) -> None:
         while True:

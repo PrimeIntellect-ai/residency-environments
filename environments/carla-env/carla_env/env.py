@@ -1024,41 +1024,59 @@ class CarlaEnv:
                 traffic_manager_enabled=bool(self.config.traffic_manager_enabled),
             ),
         )
-
-        if use_nurec:
-            world_mgr.snapshot_current_state()
-            nurec_mode = str(
-                getattr(
-                    scenario.config,
-                    "nurec_mode",
-                    getattr(self.config.nurec, "mode", "replay") or "replay",
+        actors: ActorManager | None = None
+        try:
+            if use_nurec:
+                world_mgr.snapshot_current_state()
+                nurec_mode = str(
+                    getattr(
+                        scenario.config,
+                        "nurec_mode",
+                        getattr(self.config.nurec, "mode", "replay") or "replay",
+                    )
                 )
-            )
-            if nurec_mode == "drive":
-                self._nurec_mgr.enter_drive_mode(client.client)
+                if nurec_mode == "drive":
+                    self._nurec_mgr.enter_drive_mode(client.client)
+                else:
+                    self._nurec_mgr.enter(client.client)
+                client._world = client.client.get_world()
+                client._map = client._world.get_map()
+                self._apply_nurec_world_configuration(world_mgr, scenario)
+                if map_name and not _map_matches(client._map.name, map_name):
+                    raise RuntimeError(
+                        f"NuRec scene map {client._map.name!r} does not match requested "
+                        f"scenario map {map_name!r}. Choose a scenario whose map matches "
+                        "the loaded NuRec scene."
+                    )
             else:
-                self._nurec_mgr.enter(client.client)
-            client._world = client.client.get_world()
-            client._map = client._world.get_map()
-            self._apply_nurec_world_configuration(world_mgr, scenario)
-            if map_name and not _map_matches(client._map.name, map_name):
-                raise RuntimeError(
-                    f"NuRec scene map {client._map.name!r} does not match requested scenario map {map_name!r}. "
-                    "Choose a scenario whose map matches the loaded NuRec scene."
-                )
-        else:
-            world_mgr.configure(map_name=map_name)
+                world_mgr.configure(map_name=map_name)
 
-        actors = ActorManager(world_mgr)
-        if not use_nurec and (
-            self._sandbox_pool is not None or int(self.config.max_concurrent_episodes) <= 1
-        ):
-            actors.cleanup_world()
-        for _ in range(3):
-            if use_nurec and self._nurec_mgr and self._nurec_mgr.is_active:
-                self._nurec_mgr.nurec_scenario.tick()
-            else:
-                world_mgr.tick()
+            actors = ActorManager(world_mgr)
+            if not use_nurec and (
+                self._sandbox_pool is not None or int(self.config.max_concurrent_episodes) <= 1
+            ):
+                actors.cleanup_world()
+            for _ in range(3):
+                if use_nurec and self._nurec_mgr and self._nurec_mgr.is_active:
+                    self._nurec_mgr.nurec_scenario.tick()
+                else:
+                    world_mgr.tick()
+        except BaseException:
+            if actors is not None:
+                try:
+                    actors.cleanup_tracked()
+                except Exception:
+                    pass
+            if use_nurec and self._nurec_mgr is not None and self._nurec_mgr.is_active:
+                try:
+                    self._nurec_mgr.exit()
+                except Exception:
+                    pass
+            try:
+                world_mgr.restore()
+            except Exception:
+                pass
+            raise
 
         return client, world_mgr, actors
 
