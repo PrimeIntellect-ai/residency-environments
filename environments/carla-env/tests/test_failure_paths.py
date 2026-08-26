@@ -81,7 +81,7 @@ def _fake_ready_pool(monkeypatch, coordinator, *, attempts: int) -> CarlaSandbox
     monkeypatch.setattr(
         pool,
         "_start_pproxy",
-        lambda mappings, *, verbose: SimpleNamespace(mappings=mappings),
+        lambda mappings, *, verbose: SimpleNamespace(mappings=mappings, poll=lambda: None),
     )
     monkeypatch.setattr(pool, "_stop_pproxy", lambda: setattr(pool, "_pproxy_proc", None))
 
@@ -188,6 +188,8 @@ async def test_cancelled_start_waits_for_creation_and_cleans_up(monkeypatch) -> 
     reservation = SandboxReservation("sandbox-1", "127.0.0.2")
     creation_started = threading.Event()
     allow_creation = threading.Event()
+    shutdown_started = threading.Event()
+    allow_shutdown = threading.Event()
     deleted: list[str] = []
 
     def create_pool():
@@ -197,6 +199,8 @@ async def test_cancelled_start_waits_for_creation_and_cleans_up(monkeypatch) -> 
         return [reservation]
 
     def shutdown_pool():
+        shutdown_started.set()
+        assert allow_shutdown.wait(timeout=5)
         deleted.extend(pool._sandboxes)
         pool._sandboxes.clear()
 
@@ -206,7 +210,12 @@ async def test_cancelled_start_waits_for_creation_and_cleans_up(monkeypatch) -> 
     start_task = asyncio.create_task(pool.start())
     assert await asyncio.to_thread(creation_started.wait, 5)
     start_task.cancel()
+    await asyncio.sleep(0)
+    start_task.cancel()
     allow_creation.set()
+    assert await asyncio.to_thread(shutdown_started.wait, 5)
+    start_task.cancel()
+    allow_shutdown.set()
 
     with pytest.raises(asyncio.CancelledError):
         await start_task
@@ -257,7 +266,11 @@ async def test_cancelled_acquire_returns_delivered_reservation(monkeypatch) -> N
     assert len(pool._acquire_waiters) == 1
 
     await pool.release(held)
+    await pool._start_lock.acquire()
     pending.cancel()
+    await asyncio.sleep(0)
+    pending.cancel()
+    pool._start_lock.release()
     with pytest.raises(asyncio.CancelledError):
         await pending
 
@@ -342,6 +355,49 @@ def test_creation_failure_is_retried_and_first_id_is_deleted(monkeypatch) -> Non
     assert sdk.deleted == [["sandbox-1"]]
     assert [reservation.sandbox_id for reservation in reservations] == ["sandbox-2"]
     assert pool._sandboxes == ["sandbox-2"]
+
+
+def test_final_proxy_is_revalidated_before_pool_is_ready(monkeypatch) -> None:
+    sdk, coordinator = _install_fake_prime(monkeypatch)
+    pool = _fake_ready_pool(monkeypatch, coordinator, attempts=1)
+    monkeypatch.setattr(pool, "_wait_internal_carla", lambda *args, **kwargs: None)
+    fake_carla = sys.modules["carla"]
+    original_client = fake_carla.Client
+    readiness_calls = 0
+
+    class CountingCarlaClient(original_client):
+        def get_server_version(self):
+            nonlocal readiness_calls
+            readiness_calls += 1
+            return super().get_server_version()
+
+    fake_carla.Client = CountingCarlaClient
+
+    reservations = pool._create_pool_sync()
+
+    assert sdk.created == ["sandbox-1"]
+    assert len(reservations) == 1
+    assert readiness_calls == 2
+
+
+def test_dead_final_proxy_fails_pool_creation_and_cleans_up(monkeypatch) -> None:
+    sdk, coordinator = _install_fake_prime(monkeypatch)
+    pool = _fake_ready_pool(monkeypatch, coordinator, attempts=1)
+    monkeypatch.setattr(pool, "_wait_internal_carla", lambda *args, **kwargs: None)
+    starts = 0
+
+    def start_proxy(mappings, *, verbose):
+        nonlocal starts
+        starts += 1
+        return SimpleNamespace(poll=lambda: 1 if starts == 2 else None)
+
+    monkeypatch.setattr(pool, "_start_pproxy", start_proxy)
+
+    with pytest.raises(RuntimeError, match="Final CARLA proxy exited"):
+        pool._create_pool_sync()
+
+    assert sdk.deleted == [["sandbox-1"]]
+    assert pool._sandboxes == []
 
 
 def test_post_creation_failure_retains_id_when_delete_fails(monkeypatch) -> None:
@@ -485,6 +541,19 @@ async def test_external_reserved_endpoint_is_not_acquired_twice(monkeypatch) -> 
             timeout=1,
         )
     assert reached_connect
+
+
+@pytest.mark.asyncio
+async def test_local_endpoint_defaults_resolve_before_reservation() -> None:
+    session = load_environment(sandbox={"mode": "disabled"})
+    state: dict = {}
+
+    host, port = await session.reserve_endpoint(state)
+    try:
+        assert host == "127.0.0.1"
+        assert port == 2000
+    finally:
+        await session.release_endpoint(state)
 
 
 def test_local_and_pooled_sessions_use_separate_episode_limits() -> None:

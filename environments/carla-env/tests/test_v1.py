@@ -61,6 +61,12 @@ def test_taskset_builds_native_v1_task() -> None:
             {"capture_image", "capture_depth"},
             {"observe"},
         ),
+        (
+            "free_roam_Town10HD_v1_p1",
+            {},
+            {"capture_image", "control_vehicle", "observe"},
+            {"capture_depth", "get_goal_info"},
+        ),
     ],
 )
 def test_scenario_tool_selection(
@@ -118,6 +124,7 @@ async def test_toolset_reuses_task_reserved_endpoint(monkeypatch) -> None:
     from carla_env import env as env_module
 
     setup_kwargs: dict = {}
+    load_kwargs: dict = {}
 
     class FakeSession:
         async def setup_state(self, state: dict, **kwargs) -> None:
@@ -127,7 +134,11 @@ async def test_toolset_reuses_task_reserved_endpoint(monkeypatch) -> None:
         async def cleanup(self, state: dict) -> None:
             return None
 
-    monkeypatch.setattr(env_module, "load_environment", lambda **kwargs: FakeSession())
+    def load_environment(**kwargs):
+        load_kwargs.update(kwargs)
+        return FakeSession()
+
+    monkeypatch.setattr(env_module, "load_environment", load_environment)
     toolset = CarlaToolset(vf.ToolsetConfig())
     await toolset.setup_task(CarlaTaskData(scenario="maze", env_args={}))
     toolset.state.endpoint_host = "127.0.0.2"
@@ -137,7 +148,33 @@ async def test_toolset_reuses_task_reserved_endpoint(monkeypatch) -> None:
     await toolset._ensure_session()
 
     assert setup_kwargs == {"external_endpoint_reserved": True}
+    assert load_kwargs["host"] == "127.0.0.2"
+    assert load_kwargs["port"] == 2000
     await toolset._exit_stack.aclose()
+
+
+@pytest.mark.asyncio
+async def test_toolset_syncs_video_path_after_cleanup(monkeypatch) -> None:
+    from carla_env import env as env_module
+
+    class FakeSession:
+        async def setup_state(self, state: dict, **kwargs) -> None:
+            state["prompt"] = []
+
+        async def cleanup(self, state: dict) -> None:
+            state["video_path"] = "/tmp/carla-video.mp4"
+
+    monkeypatch.setattr(env_module, "load_environment", lambda **kwargs: FakeSession())
+    toolset = CarlaToolset(vf.ToolsetConfig())
+    await toolset.setup_task(CarlaTaskData(scenario="maze", env_args={}))
+    toolset.state.endpoint_host = "127.0.0.2"
+    toolset.state.endpoint_port = 2000
+    toolset.state.carla_version = "0.10.0"
+    await toolset._ensure_session()
+
+    await toolset._exit_stack.aclose()
+
+    assert toolset.state.video_path == "/tmp/carla-video.mp4"
 
 
 @pytest.mark.asyncio

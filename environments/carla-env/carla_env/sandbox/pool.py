@@ -366,14 +366,17 @@ class CarlaSandboxPool:
             creation_task = asyncio.create_task(asyncio.to_thread(self._create_pool_sync))
             try:
                 reservations = await asyncio.shield(creation_task)
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as cancelled:
                 try:
-                    await creation_task
+                    await self._await_task_ignoring_cancellation(creation_task)
                 except BaseException:
                     pass
                 self._drain_ready()
-                await self._shutdown_cancellation_safe()
-                raise
+                try:
+                    await self._shutdown_cancellation_safe()
+                except asyncio.CancelledError:
+                    pass
+                raise cancelled
             if not reservations:
                 # Prevent acquire() from deadlocking on an empty ready queue.
                 raise RuntimeError(
@@ -403,22 +406,10 @@ class CarlaSandboxPool:
                 self._acquire_waiters.append(waiter)
         try:
             return await asyncio.shield(waiter)
-        except asyncio.CancelledError:
-            async with self._start_lock:
-                try:
-                    self._acquire_waiters.remove(waiter)
-                except ValueError:
-                    pass
-                if waiter.done() and not waiter.cancelled():
-                    try:
-                        reservation = waiter.result()
-                    except BaseException:
-                        pass
-                    else:
-                        self._release_locked(reservation)
-                elif not waiter.done():
-                    waiter.cancel()
-            raise
+        except asyncio.CancelledError as cancelled:
+            reclaim_task = asyncio.create_task(self._reclaim_cancelled_waiter(waiter))
+            await self._await_task_ignoring_cancellation(reclaim_task)
+            raise cancelled
         finally:
             if not waiter.done():
                 waiter.cancel()
@@ -430,6 +421,22 @@ class CarlaSandboxPool:
     async def release(self, reservation: SandboxReservation) -> None:
         async with self._start_lock:
             self._release_locked(reservation)
+
+    async def _reclaim_cancelled_waiter(self, waiter: asyncio.Future[SandboxReservation]) -> None:
+        async with self._start_lock:
+            try:
+                self._acquire_waiters.remove(waiter)
+            except ValueError:
+                pass
+            if waiter.done() and not waiter.cancelled():
+                try:
+                    reservation = waiter.result()
+                except BaseException:
+                    pass
+                else:
+                    self._release_locked(reservation)
+            elif not waiter.done():
+                waiter.cancel()
 
     def _release_locked(self, reservation: SandboxReservation) -> None:
         sandbox_id = reservation.sandbox_id
@@ -470,11 +477,24 @@ class CarlaSandboxPool:
 
     async def _shutdown_cancellation_safe(self) -> None:
         shutdown_task = asyncio.create_task(asyncio.to_thread(self._shutdown_sync))
-        try:
-            await asyncio.shield(shutdown_task)
-        except asyncio.CancelledError:
-            await shutdown_task
-            raise
+        cancelled: asyncio.CancelledError | None = None
+        while not shutdown_task.done():
+            try:
+                await asyncio.shield(shutdown_task)
+            except asyncio.CancelledError as error:
+                cancelled = error
+        shutdown_task.result()
+        if cancelled is not None:
+            raise cancelled
+
+    @staticmethod
+    async def _await_task_ignoring_cancellation(task: asyncio.Task) -> object:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+        return task.result()
 
     def _fail_acquire_waiters(self) -> None:
         while self._acquire_waiters:
@@ -898,6 +918,15 @@ class CarlaSandboxPool:
             mappings = build_mappings(active)
             self._pproxy_proc = self._start_pproxy(mappings, verbose=bool(cfg.pproxy_verbose))
             time.sleep(float(cfg.proxy_ready_wait_s))
+            if self._pproxy_proc.poll() is not None:
+                raise RuntimeError("Final CARLA proxy exited before the pool became ready")
+            for _, host, _ in active:
+                if not wait_carla_ready(host):
+                    raise RuntimeError(
+                        f"CARLA became unreachable through the final proxy at {host}"
+                    )
+                if self._pproxy_proc.poll() is not None:
+                    raise RuntimeError("Final CARLA proxy exited during readiness validation")
 
             for sb_id, _, _ in active:
                 if sb_id not in self._sandboxes:

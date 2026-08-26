@@ -32,7 +32,7 @@ def _enabled_tools(data: CarlaTaskData) -> set[str]:
     cosmos_enabled = bool(args.get("enable_cosmos") or _config_value(cosmos, "enabled", False))
     vision_enabled = bool(
         args.get("enable_vision")
-        or scenario.startswith("navigation_vision")
+        or scenario.startswith(("navigation_vision", "free_roam"))
         or nurec_enabled
         or cosmos_enabled
     )
@@ -129,9 +129,12 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
         if self._session is None or self._session_state is None:
             return
         session, state = self._session, self._session_state
-        self._session = None
-        self._session_state = None
-        await session.cleanup(state)
+        try:
+            await session.cleanup(state)
+        finally:
+            self._sync_state()
+            self._session = None
+            self._session_state = None
 
     def _sync_state(self) -> None:
         if self._session_state is None:
