@@ -30,7 +30,7 @@ from .core import (
 )
 from .cosmos import CosmosConfig
 from .logging import configure_logging, get_logger
-from .nurec import DEFAULT_NUREC_CAMERA_LOGICAL_ID, NuRecConfig, NuRecManager
+from .nurec import NuRecConfig, NuRecManager
 from .nurec.runtime import nurec_fixed_delta_seconds, sanitize_nurec_framerate
 from .rubrics import rubric_for_scenario
 from .sandbox import CarlaSandboxConfig, CarlaSandboxPool
@@ -417,7 +417,7 @@ def _resolve_nurec_config(
     *,
     enable_nurec: bool = False,
     nurec_scene_path: str | None = None,
-    nurec_camera_logical_id: str | None = DEFAULT_NUREC_CAMERA_LOGICAL_ID,
+    nurec_camera_logical_id: str | None = None,
     nurec_mode: str | None = None,
     nurec_resolution_ratio: float | None = None,
     nurec_framerate: float | None = None,
@@ -935,13 +935,23 @@ class CarlaEnv:
         return str(host), int(port)
 
     async def release_endpoint(self, state: State) -> None:
-        sandbox_res = state.get("_sandbox_reservation")
-        if sandbox_res is not None and self._sandbox_pool is not None:
-            await self._sandbox_pool.release(sandbox_res)
-            state["_sandbox_reservation"] = None
-        if state.get("_episode_sema_acquired"):
-            state["_episode_sema_acquired"] = False
-            self._episode_sema.release()
+        try:
+            sandbox_res = state.get("_sandbox_reservation")
+            if sandbox_res is not None and self._sandbox_pool is not None:
+                await self._sandbox_pool.release(sandbox_res)
+                state["_sandbox_reservation"] = None
+        finally:
+            if state.get("_episode_sema_acquired"):
+                state["_episode_sema_acquired"] = False
+                self._episode_sema.release()
+
+    async def _release_endpoint_cancellation_safe(self, state: State) -> None:
+        release_task = asyncio.create_task(self.release_endpoint(state))
+        try:
+            await asyncio.shield(release_task)
+        except asyncio.CancelledError:
+            await release_task
+            raise
 
     async def _acquire_sandbox(self, state: State) -> tuple[Any, Any]:
         """Acquire sandbox (if pooling) and return (host, port)."""
@@ -1428,6 +1438,49 @@ class CarlaEnv:
             return result
         return [_select_spawn_transform(world_mgr, requirements)]
 
+    async def _cleanup_failed_setup(
+        self,
+        state: State,
+        actors: ActorManager | None,
+        world_mgr: WorldManager | None,
+    ) -> None:
+        rt = state.pop("carla", None)
+        if self._nurec_mgr is not None and self._nurec_mgr.is_active:
+            try:
+                self._nurec_mgr.exit()
+            except Exception:
+                pass
+        if rt is not None:
+            for sensor in (rt.camera_sensor, rt.depth_sensor):
+                if sensor is not None:
+                    try:
+                        sensor.stop_recording()
+                    except Exception:
+                        pass
+                    try:
+                        sensor.destroy()
+                    except Exception:
+                        pass
+            try:
+                await rt.actors.cleanup_tracked_async()
+            except Exception:
+                pass
+            try:
+                rt.world.restore()
+            except Exception:
+                pass
+            return
+        if actors is not None:
+            try:
+                actors.cleanup_tracked()
+            except Exception:
+                pass
+        if world_mgr is not None:
+            try:
+                world_mgr.restore()
+            except Exception:
+                pass
+
     async def setup_state(self, state: State, **kwargs) -> State:
         host, port = await self.reserve_endpoint(state)
 
@@ -1607,59 +1660,19 @@ class CarlaEnv:
                 ]
 
             return state
-        except Exception:
-            # Best-effort CARLA cleanup on setup failure.
-            rt = state.pop("carla", None)
-            if self._nurec_mgr is not None and self._nurec_mgr.is_active:
+        except BaseException:
+            try:
+                await self._cleanup_failed_setup(state, actors, world_mgr)
+            finally:
                 try:
-                    self._nurec_mgr.exit()
-                except Exception:
-                    pass
-            if rt is not None:
-                for sensor in (rt.camera_sensor, rt.depth_sensor):
-                    if sensor is not None:
-                        try:
-                            sensor.stop_recording()
-                        except Exception:
-                            pass
-                        try:
-                            sensor.destroy()
-                        except Exception:
-                            pass
-                try:
-                    await rt.actors.cleanup_tracked_async()
-                except Exception:
-                    pass
-                try:
-                    rt.world.restore()
-                except Exception:
-                    pass
-            else:
-                if actors is not None:
-                    try:
-                        actors.cleanup_tracked()
-                    except Exception:
-                        pass
-                if world_mgr is not None:
-                    try:
-                        world_mgr.restore()
-                    except Exception:
-                        pass
-
-            sandbox_res = state.get("_sandbox_reservation")
-            if sandbox_res is not None and self._sandbox_pool is not None:
-                try:
-                    await self._sandbox_pool.release(sandbox_res)
-                except Exception:
-                    pass
-                state["_sandbox_reservation"] = None
-
-            if state.get("_episode_sema_acquired"):
-                state["_episode_sema_acquired"] = False
-                try:
-                    self._episode_sema.release()
-                except ValueError:
-                    pass
+                    await self._release_endpoint_cancellation_safe(state)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as release_error:
+                    logger.warning(
+                        "Failed to release CARLA endpoint after setup failure: %s",
+                        release_error,
+                    )
             raise
 
     async def env_response(self, messages: Messages, state: State, **kwargs) -> Messages:
@@ -1965,56 +1978,59 @@ class CarlaEnv:
         return bool(state.get("done", False))
 
     async def cleanup(self, state: State, **kwargs):
-        # Best-effort CARLA cleanup.
-        rt = state.get("carla")
-        if rt is not None:
-            if rt.camera_sensor is not None:
-                try:
-                    rt.camera_sensor.stop_recording()
-                    import uuid as _uuid
+        try:
+            # Best-effort CARLA cleanup.
+            rt = state.get("carla")
+            if rt is not None:
+                if rt.camera_sensor is not None:
+                    try:
+                        rt.camera_sensor.stop_recording()
+                        import uuid as _uuid
 
-                    video_path = rt.camera_sensor.save_video(
-                        f"episode_{int(asyncio.get_running_loop().time())}_{_uuid.uuid4().hex[:8]}.mp4"
-                    )
-                    if video_path:
-                        state["video_path"] = video_path
-                except Exception:
-                    pass
-            if self._nurec_mgr is not None and self._nurec_mgr.is_active:
+                        video_path = rt.camera_sensor.save_video(
+                            f"episode_{int(asyncio.get_running_loop().time())}_{_uuid.uuid4().hex[:8]}.mp4"
+                        )
+                        if video_path:
+                            state["video_path"] = video_path
+                    except Exception:
+                        pass
+                if self._nurec_mgr is not None and self._nurec_mgr.is_active:
+                    try:
+                        self._nurec_mgr.exit()
+                    except Exception:
+                        pass
+                if rt.camera_sensor is not None:
+                    try:
+                        rt.camera_sensor.destroy()
+                    except Exception:
+                        pass
+                if rt.depth_sensor is not None:
+                    try:
+                        rt.depth_sensor.destroy()
+                    except Exception:
+                        pass
                 try:
-                    self._nurec_mgr.exit()
+                    await rt.actors.cleanup_tracked_async()
                 except Exception:
                     pass
-            if rt.camera_sensor is not None:
                 try:
-                    rt.camera_sensor.destroy()
+                    rt.world.restore()
                 except Exception:
                     pass
-            if rt.depth_sensor is not None:
-                try:
-                    rt.depth_sensor.destroy()
-                except Exception:
-                    pass
+        finally:
             try:
-                await rt.actors.cleanup_tracked_async()
-            except Exception:
-                pass
-            try:
-                rt.world.restore()
-            except Exception:
-                pass
-
-        await self.release_endpoint(state)
-        state.pop("_camera_available", None)
-        state.pop("_depth_available", None)
-        state.pop("_observe_available", None)
-        state.pop("_pending_depth", None)
-        state.pop("_pending_image", None)
-        state.pop("_nurec_replay", None)
-        state.pop("_nurec_drive", None)
-        state.pop("_nurec_replay_done", None)
-        state.pop("_vision_only", None)
-        state.pop("_rl_rubric", None)
+                await self._release_endpoint_cancellation_safe(state)
+            finally:
+                state.pop("_camera_available", None)
+                state.pop("_depth_available", None)
+                state.pop("_observe_available", None)
+                state.pop("_pending_depth", None)
+                state.pop("_pending_image", None)
+                state.pop("_nurec_replay", None)
+                state.pop("_nurec_drive", None)
+                state.pop("_nurec_replay_done", None)
+                state.pop("_vision_only", None)
+                state.pop("_rl_rubric", None)
 
 
 def load_environment(
@@ -2035,7 +2051,7 @@ def load_environment(
     carla_version: str | None = None,
     enable_nurec: bool = False,
     nurec_scene_path: str | None = None,
-    nurec_camera_logical_id: str | None = DEFAULT_NUREC_CAMERA_LOGICAL_ID,
+    nurec_camera_logical_id: str | None = None,
     nurec_mode: str | None = None,
     nurec_resolution_ratio: float | None = None,
     nurec_framerate: float | None = None,

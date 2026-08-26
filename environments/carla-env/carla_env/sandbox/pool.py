@@ -349,6 +349,14 @@ class CarlaSandboxPool:
                 return
             if self.config.mode == "disabled":
                 raise RuntimeError("Sandbox pool is disabled (mode='disabled')")
+            if self._sandboxes:
+                await asyncio.to_thread(self._shutdown_sync)
+                if self._sandboxes:
+                    raise RuntimeError(
+                        "Cannot start a new CARLA sandbox pool while previously created "
+                        f"sandboxes still require deletion: {self._sandboxes}"
+                    )
+            self._drain_ready()
             reservations = await asyncio.to_thread(self._create_pool_sync)
             if not reservations:
                 # Prevent acquire() from deadlocking on an empty ready queue.
@@ -356,9 +364,14 @@ class CarlaSandboxPool:
                     "Sandbox pool created no reservations. "
                     "This is unexpected; check sandbox mode/configuration."
                 )
-            for res in reservations:
-                self._ready.put_nowait(res)
-            self._started = True
+            try:
+                for res in reservations:
+                    self._ready.put_nowait(res)
+                self._started = True
+            except BaseException:
+                self._drain_ready()
+                await asyncio.to_thread(self._shutdown_sync)
+                raise
 
     async def acquire(self) -> SandboxReservation:
         await self.start()
@@ -370,10 +383,21 @@ class CarlaSandboxPool:
         await self._ready.put(reservation)
 
     async def shutdown(self) -> None:
-        if not self._started:
+        if not self._started and not self._sandboxes:
             return
-        await asyncio.to_thread(self._shutdown_sync)
-        self._started = False
+        async with self._start_lock:
+            if not self._started and not self._sandboxes:
+                return
+            self._started = False
+            self._drain_ready()
+            await asyncio.to_thread(self._shutdown_sync)
+
+    def _drain_ready(self) -> None:
+        while True:
+            try:
+                self._ready.get_nowait()
+            except asyncio.QueueEmpty:
+                return
 
     # ------------------------- Sync helpers -------------------------
 
@@ -514,10 +538,13 @@ class CarlaSandboxPool:
             return local_mappings
 
         # Track IPs allocated to active sandboxes across retries.
-        # Guarded by _alloc_lock because create_one runs in a thread pool.
+        # Guarded by _alloc_lock because create_one runs in a thread pool. IDs
+        # are recorded as soon as creation succeeds so later startup failures
+        # cannot orphan a billable sandbox.
         _alloc_lock = threading.Lock()
         next_ip_idx = 0
         sandbox_seq = 0
+        created_ids: set[str] = set()
 
         def _claim_next_ip() -> str:
             """Return the next unclaimed loopback IP, skipping IPs owned by survivors."""
@@ -557,16 +584,22 @@ class CarlaSandboxPool:
 
             logger.info("Creating CARLA sandbox %s ...", name)
             sb = local_client.create(request)
-            local_client.wait_for_creation(sb.id, max_attempts=240)
+            sandbox_id = str(sb.id)
+            with _alloc_lock:
+                created_ids.add(sandbox_id)
+            local_client.wait_for_creation(sandbox_id, max_attempts=240)
 
             # Wait for CARLA to start inside the sandbox.
             self._wait_internal_carla(
-                local_client, sb.id, port=CARLA_PORTS[0], timeout_s=int(cfg.internal_wait_mins) * 60
+                local_client,
+                sandbox_id,
+                port=CARLA_PORTS[0],
+                timeout_s=int(cfg.internal_wait_mins) * 60,
             )
 
-            local_mappings = expose_ports(local_client, sb.id, local_ip)
+            local_mappings = expose_ports(local_client, sandbox_id, local_ip)
 
-            return sb.id, local_ip, local_mappings
+            return sandbox_id, local_ip, local_mappings
 
         def unexpose_all(sandbox_id: str) -> None:
             try:
@@ -587,18 +620,23 @@ class CarlaSandboxPool:
                 pass
             return expose_ports(client, sandbox_id, local_ip)
 
-        def delete_sandboxes(ids: list[str]) -> None:
-            if not ids:
-                return
-            for sb_id in ids:
+        def delete_sandboxes(ids: list[str]) -> bool:
+            targets = list(dict.fromkeys(str(sb_id) for sb_id in ids))
+            if not targets:
+                return True
+            for sb_id in targets:
                 try:
                     unexpose_all(sb_id)
                 except Exception:
                     pass
             try:
-                client.bulk_delete(sandbox_ids=list(ids))
+                client.bulk_delete(sandbox_ids=targets)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to bulk delete sandboxes: %s", e)
+                return False
+            with _alloc_lock:
+                created_ids.difference_update(targets)
+            return True
 
         def build_mappings(
             active: list[tuple[str, str, list[tuple[str, int, str, int]]]],
@@ -641,7 +679,6 @@ class CarlaSandboxPool:
             tuple[str, str, list[tuple[str, int, str, int]]]
         ] = []  # (sandbox_id, host, mappings)
         attempts = 0
-        created_ids: list[str] = []
 
         try:
             while len(active) < int(cfg.pool_size) and attempts < int(cfg.max_pool_start_attempts):
@@ -661,27 +698,34 @@ class CarlaSandboxPool:
                             futures.append(executor.submit(create_one))
                         for fut in as_completed(futures):
                             sb_id, local_ip, local_mappings = fut.result()
-                            created_ids.append(sb_id)
                             active.append((sb_id, local_ip, local_mappings))
                 except Exception as e:  # noqa: BLE001
-                    # Harvest sandbox IDs from completed-but-unharvested
-                    # futures so they are cleaned up too.
-                    for fut in futures:
-                        if fut.done() and not fut.cancelled():
-                            try:
-                                sb_id, _, _ = fut.result()
-                                if sb_id not in created_ids:
-                                    created_ids.append(sb_id)
-                            except Exception:
-                                pass
-                    logger.error("Failed to create CARLA sandbox pool concurrently: %s", e)
-                    delete_sandboxes(created_ids)
-                    raise
+                    logger.warning(
+                        "Failed to create CARLA sandbox pool concurrently (attempt %s/%s): %s",
+                        attempts,
+                        cfg.max_pool_start_attempts,
+                        e,
+                    )
+                    self._stop_pproxy()
+                    with _alloc_lock:
+                        attempt_ids = list(created_ids)
+                    active.clear()
+                    if not delete_sandboxes(attempt_ids):
+                        raise RuntimeError(
+                            "Sandbox creation failed and its partial resources could not be "
+                            "deleted; aborting before creating replacements"
+                        ) from e
+                    if attempts >= int(cfg.max_pool_start_attempts):
+                        raise RuntimeError(
+                            f"Failed to create CARLA sandbox pool after {attempts} attempt(s)"
+                        ) from e
+                    continue
 
                 # Defensive check: never allow two sandboxes to map to the same local loopback IP.
                 local_ips = [host for _, host, _ in active]
                 if len(local_ips) != len(set(local_ips)):
-                    delete_sandboxes([sb_id for sb_id, _, _ in active])
+                    duplicate_ids = [sb_id for sb_id, _, _ in active]
+                    delete_sandboxes(duplicate_ids)
                     raise RuntimeError(
                         f"Duplicate loopback IPs assigned in sandbox pool: {local_ips}"
                     )
@@ -740,10 +784,12 @@ class CarlaSandboxPool:
                         len(failed_ids),
                         failed_ids,
                     )
-                    delete_sandboxes(failed_ids)
+                    if not delete_sandboxes(failed_ids):
+                        raise RuntimeError(
+                            "Failed to delete sandboxes that did not become ready; "
+                            "aborting before creating replacements"
+                        )
                     active = ready
-                    # Prune created_ids as well.
-                    created_ids = [sb_id for sb_id, _, _ in active]
                 else:
                     active = ready
 
@@ -761,7 +807,9 @@ class CarlaSandboxPool:
             self._pproxy_proc = self._start_pproxy(mappings, verbose=bool(cfg.pproxy_verbose))
             time.sleep(float(cfg.proxy_ready_wait_s))
 
-            self._sandboxes.extend([sb_id for sb_id, _, _ in active])
+            for sb_id, _, _ in active:
+                if sb_id not in self._sandboxes:
+                    self._sandboxes.append(sb_id)
             reservations = [
                 SandboxReservation(sandbox_id=sb_id, host=host, port=CARLA_PORTS[0])
                 for sb_id, host, _ in active
@@ -769,10 +817,17 @@ class CarlaSandboxPool:
 
             logger.info("CARLA sandbox pool ready: %s sandboxes mapped", len(reservations))
             return reservations
-        except Exception:
+        except BaseException:
             # Best-effort cleanup
             self._stop_pproxy()
-            delete_sandboxes(created_ids)
+            with _alloc_lock:
+                cleanup_ids = list(created_ids)
+            delete_sandboxes(cleanup_ids)
+            with _alloc_lock:
+                undeleted_ids = list(created_ids)
+            for sb_id in undeleted_ids:
+                if sb_id not in self._sandboxes:
+                    self._sandboxes.append(sb_id)
             raise
 
     def _start_pproxy(
@@ -833,9 +888,16 @@ class CarlaSandboxPool:
         self._stop_pproxy()
 
         # Delete sandboxes if we created them.
-        if self._sandboxes and self._client is not None:
-            try:
-                self._client.bulk_delete(sandbox_ids=list(self._sandboxes))
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to bulk delete sandboxes: %s", e)
+        if not self._sandboxes:
+            return
+        if self._client is None:
+            logger.warning(
+                "Cannot delete tracked sandboxes without a Prime client: %s", self._sandboxes
+            )
+            return
+        try:
+            self._client.bulk_delete(sandbox_ids=list(self._sandboxes))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to bulk delete sandboxes: %s", e)
+            return
         self._sandboxes.clear()
