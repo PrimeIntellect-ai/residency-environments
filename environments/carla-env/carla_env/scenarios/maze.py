@@ -44,35 +44,7 @@ class MazeScenario(BaseScenario[MazeConfig]):
             if goal_info_available
             else "This replay does not use an active hidden goal.\n"
         )
-        goal_tools = (
-            "- get_goal_info(): distance/direction to goal (use often)\n"
-            if goal_info_available
-            else ""
-        )
-        intro = (
-            "Use tools to inspect the run and to query goal distance.\n\n"
-            if goal_info_available
-            else "Use tools to inspect the run as it unfolds.\n\n"
-        )
-        motion_tools = (
-            "- init_navigation_agent(behavior): setup a CARLA agent\n"
-            "- set_destination(x, y): pick a destination\n"
-            "- follow_route(steps): let the agent drive for N ticks\n"
-            "- lane_change(direction)\n"
-            "- emergency_stop(), brake_vehicle(intensity), control_vehicle(throttle, steer)\n"
-            if self.motion_tools_enabled()
-            else ""
-        )
-        return (
-            "You control a vehicle in a navigation task.\n\n"
-            f"{objective_block}"
-            f"{replay_note}"
-            f"{intro}"
-            "Available tools:\n"
-            "- observe(): get a new observation\n"
-            f"{goal_tools}"
-            f"{motion_tools}"
-        )
+        return f"Complete the navigation task.\n\n{objective_block}{replay_note}"
 
     def reset(self, state: Any) -> None:
         cfg = self.config

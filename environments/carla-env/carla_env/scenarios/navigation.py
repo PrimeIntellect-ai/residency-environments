@@ -293,9 +293,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         goal = state.get("scenario_data", {}).get("goal_location")
         camera_available = bool(state.get("_camera_available", self.config.enable_vision))
         depth_available = bool(state.get("_depth_available", False))
-        observe_available = bool(state.get("_observe_available", self.observe_tool_enabled()))
         goal_info_available = bool(state.get("_goal_info_available", self.goal_info_enabled()))
-        motion_tools_enabled = self.motion_tools_enabled()
         replay_note = self.replay_readonly_note()
         goal_line = ""
         if goal_info_available and goal is not None:
@@ -303,18 +301,11 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
                 f"Destination coordinates: x={goal[0]:.1f}, y={goal[1]:.1f}, z={goal[2]:.1f}\n"
             )
         if self.config.vision_only:
-            vision_note = (
-                "Use the available vision tools to inspect the road scene before taking actions.\n"
-            )
-            vision_tools = ""
-            if camera_available:
-                vision_tools += "- capture_image(): capture the current front RGB camera image\n"
+            vision_note = "Inspect the road through the available vision observations.\n"
             if not camera_available and depth_available:
-                vision_note = "RGB camera unavailable in this episode; use depth capture to inspect the road scene.\n"
+                vision_note = "RGB is unavailable; depth observations remain available.\n"
             elif not camera_available and not depth_available:
                 vision_note = "Vision sensors unavailable in this episode.\n"
-            if depth_available:
-                vision_tools += "- capture_depth(): capture the current front depth camera image\n"
             objective_block = (
                 f"Goal: navigate to within {self.config.success_radius:.0f}m of the destination.\n"
                 f"{goal_line}"
@@ -322,36 +313,12 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
                 if goal_info_available
                 else "This replay does not use a live navigation goal.\n"
             )
-            goal_tools = (
-                "- get_goal_info(): get distance/progress to goal without direction\n"
-                if goal_info_available
-                else ""
-            )
             return (
-                "You control a vehicle in a vision-only navigation environment.\n\n"
+                "Complete the vision-only navigation task.\n\n"
                 f"{objective_block}"
                 "You do not receive text observations about nearby actors, lanes, or goal distance.\n"
                 f"{replay_note}"
                 f"{vision_note}"
-                "Available tools:\n"
-                f"{vision_tools}"
-                + (
-                    "- observe(): advance the replay without receiving text observations\n"
-                    if observe_available
-                    else ""
-                )
-                + goal_tools
-                + (
-                    "- control_vehicle(throttle, steer): manual control\n"
-                    "- brake_vehicle(intensity): apply brakes\n"
-                    "- lane_change(direction): change lane left/right\n"
-                    "- init_navigation_agent(behavior): start autopilot\n"
-                    "- set_destination(x, y, z): set navigation goal\n"
-                    "- follow_route(steps): follow planned route\n"
-                    "- emergency_stop(): stop immediately\n"
-                    if motion_tools_enabled
-                    else ""
-                )
             )
         camera_note = ""
         if self.config.enable_vision and not camera_available:
@@ -368,43 +335,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
             if goal_info_available
             else "Goal-based navigation is disabled for this replay.\n"
         )
-        tools = "Available tools:\n"
-        if goal_info_available:
-            tools += "- get_goal_info(): distance and direction to goal\n"
-        if observe_available:
-            tools += "- observe(): get current state\n"
-        if motion_tools_enabled:
-            tools += (
-                "- control_vehicle(throttle, steer): manual control\n"
-                "- brake_vehicle(intensity): apply brakes\n"
-                "- lane_change(direction): change lane left/right\n"
-                "- init_navigation_agent(behavior): start autopilot\n"
-                "- set_destination(x, y, z): set navigation goal\n"
-                "- follow_route(steps): follow planned route\n"
-                "- emergency_stop(): stop immediately\n"
-            )
-        if camera_available:
-            tools += "- capture_image(): capture the front RGB camera\n"
-        if depth_available:
-            tools += "- capture_depth(): capture the front depth camera\n"
-        strategy_note = (
-            "Recommended strategy: initialize a navigation agent, set the destination, "
-            "then follow the route while observing regularly.\n\n"
-            if motion_tools_enabled
-            else (
-                "Recommended strategy: inspect the replay as it unfolds and use goal progress queries when needed.\n\n"
-                if goal_info_available
-                else "Recommended strategy: inspect the replay as it unfolds.\n\n"
-            )
-        )
-        return (
-            "You control a vehicle in an open navigation environment.\n\n"
-            f"{objective_block}"
-            f"{replay_note}"
-            f"{camera_note}"
-            f"{strategy_note}"
-            f"{tools}"
-        )
+        return f"Complete the open navigation task.\n\n{objective_block}{replay_note}{camera_note}"
 
     def ticks_after_tool(self, tool_name: str, tool_args: dict, state: Any) -> int:
         if tool_name in {"capture_image", "capture_depth", "get_goal_info", "follow_route"}:

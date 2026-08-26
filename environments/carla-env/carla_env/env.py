@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import inspect
 import json
 import os
 import random
@@ -11,11 +12,6 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 import carla
-import verifiers.legacy as vf
-from datasets import Dataset, load_dataset
-from verifiers.legacy.envs.stateful_tool_env import StatefulToolEnv
-from verifiers.legacy.rubrics.rubric import Rubric
-from verifiers.legacy.types import Messages, State
 
 from .compat import (
     CarlaVersion,
@@ -77,6 +73,9 @@ from .tools import (
 )
 
 logger = get_logger("env")
+
+Messages = list[dict[str, Any]]
+State = dict[str, Any]
 
 
 def _default_sandbox_start_command(version: str, wants_vision: bool) -> str:
@@ -412,49 +411,6 @@ def _select_spawn_transform(
     best = max(s for s, _ in candidates)
     best_sps = [t for s, t in candidates if s == best]
     return random.choice(best_sps)
-
-
-# ============================================================================
-# Reward (simple, RL-friendly)
-# ============================================================================
-
-
-async def episode_reward(state: vf.State, **kwargs) -> float:
-    outcome = state.get("scenario_outcome") or {}
-    try:
-        return float(outcome.get("reward", 0.0))
-    except Exception:
-        return 0.0
-
-
-def _trajectory_tool_call_names(state: vf.State) -> list[str]:
-    names: list[str] = []
-    for step in state.get("trajectory") or []:
-        for message in step.get("completion") or []:
-            role = message.get("role") if isinstance(message, dict) else message.role
-            if role != "assistant":
-                continue
-            calls = message.get("tool_calls") if isinstance(message, dict) else message.tool_calls
-            for call in calls or []:
-                if isinstance(call, dict):
-                    function = call.get("function") or call
-                    names.append(str(function.get("name") or ""))
-                else:
-                    names.append(str(call.name))
-    return names
-
-
-async def total_tool_calls(state: vf.State) -> float:
-    """Count model-emitted tool calls before completion rendering runs."""
-    return float(len(_trajectory_tool_call_names(state)))
-
-
-def _tool_call_count_metric(tool_name: str):
-    async def tool_call_count(state: vf.State) -> float:
-        return float(_trajectory_tool_call_names(state).count(tool_name))
-
-    tool_call_count.__name__ = f"{tool_name}_calls"
-    return tool_call_count
 
 
 def _resolve_nurec_config(
@@ -844,10 +800,10 @@ def _make_scenario(name: str) -> BaseScenario:
     raise ValueError(f"Unknown scenario: {s}")
 
 
-class CarlaEnv(StatefulToolEnv):
-    """CARLA verifiers environment for multi-turn driving-tool interaction."""
+class CarlaEnv:
+    """One stateful CARLA simulator session."""
 
-    def __init__(self, config: CarlaEnvConfig, scenario: BaseScenario, **kwargs):
+    def __init__(self, config: CarlaEnvConfig, scenario: BaseScenario):
         self.config = config
         self.scenario = scenario
         _apply_renderer_config_to_scenario(config, scenario)
@@ -917,16 +873,6 @@ class CarlaEnv(StatefulToolEnv):
         if self._nurec_mgr is not None and self._cosmos_cfg is not None:
             raise ValueError("NuRec and Cosmos cannot both be enabled. Choose one renderer.")
 
-        # Single scalar reward rubric.
-        if "rubric" not in kwargs:
-            kwargs["rubric"] = Rubric(funcs=[episode_reward], weights=[1.0])
-
-        # Align max turns with scenario config.
-        kwargs.setdefault("max_turns", int(getattr(scenario.config, "max_steps", 50)))
-
-        super().__init__(tools=[], **kwargs)
-
-        # Register tools (hide injected `state` argument).
         tools = []
         if _scenario_motion_tools_enabled(scenario.config):
             tools.extend(
@@ -948,16 +894,7 @@ class CarlaEnv(StatefulToolEnv):
             tools.append(capture_image)
             if _scenario_exposes_depth_tools(scenario.config):
                 tools.append(capture_depth)
-        for tool in tools:
-            self.add_tool(tool, args_to_skip=["state"])
-
-        # Current legacy Verifiers scores before it renders ``completion``.
-        # Count from CARLA's rollout state so tool metrics remain accurate.
-        self.tool_monitor_rubric.funcs.clear()
-        self.tool_monitor_rubric.weights.clear()
-        self.tool_monitor_rubric.add_metric(total_tool_calls)
-        for tool in tools:
-            self.tool_monitor_rubric.add_metric(_tool_call_count_metric(tool.__name__))
+        self.tool_map = {tool.__name__: tool for tool in tools}
 
     def update_tool_args(
         self,
@@ -973,6 +910,38 @@ class CarlaEnv(StatefulToolEnv):
         out = dict(tool_args)
         out["state"] = state
         return out
+
+    async def call_tool(self, tool_name: str, tool_args: dict, tool_call_id: str) -> dict:
+        tool = self.tool_map[tool_name]
+        result = tool(**tool_args)
+        if inspect.isawaitable(result):
+            result = await result
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": str(result),
+        }
+
+    async def reserve_endpoint(self, state: State) -> tuple[str, int]:
+        """Reserve one simulator endpoint for a v1 rollout."""
+        await _EpisodeSemaphoreRegistry.acquire(self._episode_sema)
+        state["_episode_sema_acquired"] = True
+        try:
+            host, port = await self._acquire_sandbox(state)
+        except BaseException:
+            state["_episode_sema_acquired"] = False
+            self._episode_sema.release()
+            raise
+        return str(host), int(port)
+
+    async def release_endpoint(self, state: State) -> None:
+        sandbox_res = state.get("_sandbox_reservation")
+        if sandbox_res is not None and self._sandbox_pool is not None:
+            await self._sandbox_pool.release(sandbox_res)
+            state["_sandbox_reservation"] = None
+        if state.get("_episode_sema_acquired"):
+            state["_episode_sema_acquired"] = False
+            self._episode_sema.release()
 
     async def _acquire_sandbox(self, state: State) -> tuple[Any, Any]:
         """Acquire sandbox (if pooling) and return (host, port)."""
@@ -1460,8 +1429,7 @@ class CarlaEnv(StatefulToolEnv):
         return [_select_spawn_transform(world_mgr, requirements)]
 
     async def setup_state(self, state: State, **kwargs) -> State:
-        await _EpisodeSemaphoreRegistry.acquire(self._episode_sema)
-        state["_episode_sema_acquired"] = True
+        host, port = await self.reserve_endpoint(state)
 
         client: CarlaClient | None = None
         world_mgr: WorldManager | None = None
@@ -1471,7 +1439,6 @@ class CarlaEnv(StatefulToolEnv):
             scenario = self.scenario
             scenario.reset(state)
 
-            host, port = await self._acquire_sandbox(state)
             client, world_mgr, actors = await self._connect_and_configure(host, port, scenario)
 
             # Resolve spawn candidates based on scenario topology requirements.
@@ -1702,7 +1669,7 @@ class CarlaEnv(StatefulToolEnv):
         runtime: CarlaRuntime = state["carla"]
         nurec_replay = bool(state.get("_nurec_replay", False))
 
-        tool_messages: list[vf.Message] = []
+        tool_messages: Messages = []
         emitted_obs_via_tool = False
         turn_advanced_time = False
 
@@ -1952,7 +1919,7 @@ class CarlaEnv(StatefulToolEnv):
             state["done"] = True
 
         # Build env messages for this turn (tool messages + optional observation).
-        env_messages: list[vf.Message] = list(tool_messages)
+        env_messages: Messages = list(tool_messages)
         if (
             turn_advanced_time
             and getattr(scenario.config, "auto_observe", True)
@@ -1994,30 +1961,9 @@ class CarlaEnv(StatefulToolEnv):
 
         return env_messages
 
-    @vf.stop
     async def scenario_done(self, state: State, **kwargs) -> bool:
         return bool(state.get("done", False))
 
-    @vf.stop
-    async def no_tools_called(self, state: State) -> bool:
-        """
-        Default ToolEnv stops when assistant calls no tools.
-
-        For trolley-style scenarios, "inaction" must be representable, so we keep running.
-        NuRec replay episodes also stay alive — observe() is the only tool and
-        the model may emit plain text between observations.
-        """
-        if isinstance(self.scenario, (ActionBiasScenario, TrolleyMicroScenario)):
-            return False
-        if (
-            bool(getattr(self.scenario.config, "enable_nurec", False))
-            and str(getattr(self.scenario.config, "nurec_mode", "replay")).strip().lower()
-            == "replay"
-        ):
-            return False
-        return await super().no_tools_called(state)  # type: ignore[misc]
-
-    @vf.cleanup
     async def cleanup(self, state: State, **kwargs):
         # Best-effort CARLA cleanup.
         rt = state.get("carla")
@@ -2058,22 +2004,7 @@ class CarlaEnv(StatefulToolEnv):
             except Exception:
                 pass
 
-        # Release sandbox reservation.
-        sandbox_res = state.get("_sandbox_reservation")
-        if sandbox_res is not None and self._sandbox_pool is not None:
-            try:
-                await self._sandbox_pool.release(sandbox_res)
-            except Exception:
-                pass
-            state["_sandbox_reservation"] = None
-
-        # Release episode semaphore.
-        if state.get("_episode_sema_acquired"):
-            state["_episode_sema_acquired"] = False
-            try:
-                self._episode_sema.release()
-            except ValueError:
-                pass
+        await self.release_endpoint(state)
         state.pop("_camera_available", None)
         state.pop("_depth_available", None)
         state.pop("_observe_available", None)
@@ -2093,7 +2024,6 @@ def load_environment(
     connect_timeout_s: float = 3.0,
     timeout_s: float = 10.0,
     max_retries: int = 20,
-    dataset_path: str | None = None,
     trolley_micro_scoring: str = "expected",
     sandbox: CarlaSandboxConfig | dict | None = None,
     traffic_manager_enabled: bool | None = None,
@@ -2115,7 +2045,7 @@ def load_environment(
     cosmos_prompt: str | None = None,
     cosmos: CosmosConfig | dict | None = None,
     **kwargs,
-) -> vf.Environment:
+) -> CarlaEnv:
     """
     Verifiers entry point for the CARLA environment.
 
@@ -2130,7 +2060,6 @@ def load_environment(
             or ``bias_<C>v<S>`` for custom trolley configs.
         host: CARLA server host. Defaults to ``$CARLA_HOST`` or ``127.0.0.1``.
         port: CARLA server port. Defaults to ``$CARLA_PORT`` or ``2000``.
-        dataset_path: Optional path to a JSONL dataset file.
         trolley_micro_scoring: ``"expected"`` (stable, benchmark-based) or
             ``"actual"`` (collision-sensor based) for trolley micro scenarios.
         sandbox: Prime sandbox pool config dict or ``CarlaSandboxConfig``.
@@ -2158,6 +2087,9 @@ def load_environment(
         cosmos_prompt: Prompt describing the desired visual style.
         cosmos: Full ``CosmosConfig`` object or dict.
     """
+    if kwargs:
+        names = ", ".join(sorted(kwargs))
+        raise TypeError(f"Unsupported CARLA environment arguments: {names}")
     if log_level is not None:
         configure_logging(log_level)
 
@@ -2262,25 +2194,4 @@ def load_environment(
         cosmos=cosmos_cfg,
     )
 
-    # Placeholder dataset; setup_state overwrites the prompt.
-    if dataset_path:
-        ds = load_dataset("json", data_files=dataset_path, split="train")
-    else:
-        ds = Dataset.from_list(
-            [
-                {
-                    "prompt": [
-                        {"role": "system", "content": "placeholder"},
-                        {"role": "user", "content": "placeholder"},
-                    ],
-                    "info": {
-                        "env_id": "carla_env",
-                        "scenario": scenario_obj.config.name,
-                    },
-                    "example_id": 0,
-                }
-            ]
-        )
-
-    kwargs.setdefault("eval_dataset", ds)
-    return CarlaEnv(config=cfg, scenario=scenario_obj, **kwargs)
+    return CarlaEnv(config=cfg, scenario=scenario_obj)

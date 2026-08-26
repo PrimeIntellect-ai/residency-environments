@@ -6,7 +6,7 @@ CARLA verifiers environment for autonomous-driving evaluation and RL.
 | --- | --- |
 | **Environment ID** | `carla-env` |
 | **Version** | `0.3.0` |
-| **Type** | Verifiers v1 taskset backed by `StatefulToolEnv` |
+| **Type** | Native Verifiers v1 taskset with a per-rollout MCP toolset |
 
 ## Overview
 
@@ -29,6 +29,11 @@ Observation modes:
 
 - Text-first: trolley, action-bias, maze, `navigation*`
 - Vision-first: `navigation_vision*`
+
+Each rollout uses the standard v1 agent/harness path. `Task.setup` reserves an
+independent CARLA endpoint, the task-scoped MCP toolset owns the simulator
+session, and `Task.finalize` releases the endpoint. Rewards, metrics, stopping,
+and trace state use native v1 hooks and records.
 
 ## Quickstart
 
@@ -87,20 +92,27 @@ docker run --rm \
   /bin/sh -lc 'mkdir -p /tmp/runtime-carla && chmod 700 /tmp/runtime-carla && cd /workspace && exec ./CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000 -stdout -FullStdOutLogOutput -unattended'
 ```
 
-Then run examples:
+Then run examples. The `null` harness is the smallest built-in MCP-capable
+harness for direct simulator interaction:
 
 ```bash
 uv run eval carla-env -m "openai/gpt-4.1-mini" \
-  --env.taskset.env-args '{"scenario": "maze", "sandbox": {"mode": "disabled"}, "host": "127.0.0.1", "port": 2000, "carla_version": "0.9.16"}' \
-  -n 1 -r 1
+  --env.taskset.scenario maze \
+  --env.taskset.env-args '{"sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":2000,"carla_version":"0.9.16"}' \
+  --env.agent.harness.id null --env.agent.max-turns 4 \
+  -n 1 -r 2
 
 uv run eval carla-env -m "openai/gpt-4.1-mini" \
-  --env.taskset.env-args '{"scenario": "navigation_Town10HD_v1_p1", "sandbox": {"mode": "disabled"}, "host": "127.0.0.1", "port": 2000, "carla_version": "0.9.16"}' \
-  -n 1 -r 1
+  --env.taskset.scenario navigation_Town10HD_v1_p1 \
+  --env.taskset.env-args '{"sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":2000,"carla_version":"0.9.16"}' \
+  --env.agent.harness.id null --env.agent.max-turns 4 \
+  -n 1 -r 2
 
 uv run eval carla-env -m "qwen/qwen3-vl-8b-instruct" \
-  --env.taskset.env-args '{"scenario": "navigation_vision_Town10HD_v1_p1", "sandbox": {"mode": "disabled"}, "host": "127.0.0.1", "port": 2000, "carla_version": "0.9.16"}' \
-  -n 1 -r 1
+  --env.taskset.scenario navigation_vision_Town10HD_v1_p1 \
+  --env.taskset.env-args '{"sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":2000,"carla_version":"0.9.16"}' \
+  --env.agent.harness.id null --env.agent.max-turns 4 \
+  -n 1 -r 2
 ```
 
 ## Pod Local Server
@@ -121,8 +133,10 @@ Example:
 sudo environments/carla-env/scripts/start_local_carla_on_pod.sh start --mode vision --port 4000
 
 uv run eval carla-env -m "qwen/qwen3-vl-8b-instruct" \
-  --env.taskset.env-args '{"scenario":"navigation_vision_Town10HD_v1_p1","sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":4000,"carla_version":"0.10.0"}' \
-  -n 1 -r 1
+  --env.taskset.scenario navigation_vision_Town10HD_v1_p1 \
+  --env.taskset.env-args '{"sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":4000,"carla_version":"0.10.0"}' \
+  --env.agent.harness.id null --env.agent.max-turns 4 \
+  -n 1 -r 2
 ```
 
 ## Stage 3 Rendering
@@ -147,10 +161,9 @@ Operational helper:
 
 | Argument | Default | Description |
 | --- | --- | --- |
-| `scenario` | `"action_bias_saves"` | Scenario identifier |
+| `--env.taskset.scenario` | `"action_bias_saves"` | Scenario identifier |
 | `host` | `$CARLA_HOST` or `127.0.0.1` | CARLA host |
 | `port` | `$CARLA_PORT` or `2000` | CARLA port |
-| `dataset_path` | `None` | Custom JSONL dataset |
 | `trolley_micro_scoring` | `"expected"` | `"expected"` or `"actual"` |
 | `sandbox` | `{"mode":"prime"}` | Prime sandbox config or local mode |
 | `traffic_manager_enabled` | `None` | Explicit TrafficManager opt-in/out |

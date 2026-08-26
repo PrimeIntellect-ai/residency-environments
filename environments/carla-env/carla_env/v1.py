@@ -1,142 +1,136 @@
-"""Verifiers v1 adapter for the CARLA environment."""
+"""Native Verifiers v1 taskset, lifecycle, state, and scoring."""
 
 from __future__ import annotations
 
-import inspect
-import traceback
-from collections.abc import Callable, Iterable
+from collections import Counter
+from collections.abc import Iterable
 from typing import Any
 
 import verifiers.v1 as vf
 from pydantic import Field
-from verifiers.v1.agent import Agents
-from verifiers.v1.clients import ModelContext
-from verifiers.v1.configs.agent import AgentConfig
-from verifiers.v1.configs.env import EnvConfig
-from verifiers.v1.configs.taskset import TasksetConfig
-from verifiers.v1.episode import EnvInfo, Episode
-from verifiers.v1.task import Task, TaskData
-from verifiers.v1.trace import Error, Trace
-
-from .bridge import legacy_client, legacy_output_to_trace
 
 
-class CarlaTaskData(TaskData):
-    """One indexed rollout from the configured legacy dataset."""
+class CarlaState(vf.State):
+    """Serializable state shared by the task and its per-rollout tool server."""
+
+    scenario: str = ""
+    endpoint_host: str | None = None
+    endpoint_port: int | None = None
+    endpoint_reserved: bool = False
+    sandbox_id: str | None = None
+    carla_version: str = ""
+    traffic_manager_enabled: bool = False
+    done: bool = False
+    env_step: int = 0
+    observation: str = ""
+    reward: float = 0.0
+    scenario_outcome: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    video_path: str | None = None
 
 
-class CarlaTask(Task[CarlaTaskData]):
-    """Task marker used by the v1 taskset loader."""
+class CarlaTaskData(vf.TaskData):
+    """Configuration for one independently provisioned CARLA rollout."""
 
-
-class CarlaTasksetConfig(TasksetConfig):
+    scenario: str
     env_args: dict[str, Any] = Field(default_factory=dict)
-    """Arguments forwarded unchanged to ``load_environment``."""
 
+
+class CarlaTaskConfig(vf.TaskConfig):
+    tools: vf.ToolsetConfig = vf.ToolsetConfig()
+
+
+class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
+    @classmethod
+    def toolsets(cls, config: CarlaTaskConfig) -> list[vf.Toolset]:
+        from .toolset import CarlaToolset
+
+        return [CarlaToolset(config.tools)]
+
+    async def setup(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
+        del runtime
+        from .env import load_environment
+
+        session = load_environment(scenario=self.data.scenario, **self.data.env_args)
+        lease: dict[str, Any] = {}
+        host, port = await session.reserve_endpoint(lease)
+        state = trace.state
+        state.scenario = self.data.scenario
+        state.endpoint_host = host
+        state.endpoint_port = port
+        state.endpoint_reserved = True
+        state.carla_version = str(session.config.carla_version)
+        state.traffic_manager_enabled = bool(session.config.traffic_manager_enabled)
+        reservation = lease.get("_sandbox_reservation")
+        state.sandbox_id = reservation.sandbox_id if reservation is not None else None
+
+    async def finalize(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
+        del runtime
+        state = trace.state
+        if not state.endpoint_reserved:
+            return
+
+        from .env import load_environment
+        from .sandbox.pool import SandboxReservation
+
+        session = load_environment(scenario=self.data.scenario, **self.data.env_args)
+        lease: dict[str, Any] = {"_episode_sema_acquired": True}
+        if state.sandbox_id and state.endpoint_host and state.endpoint_port:
+            lease["_sandbox_reservation"] = SandboxReservation(
+                sandbox_id=state.sandbox_id,
+                host=state.endpoint_host,
+                port=state.endpoint_port,
+            )
+        try:
+            await session.release_endpoint(lease)
+        finally:
+            state.endpoint_reserved = False
+
+    @vf.stop
+    def scenario_done(self, trace: vf.Trace) -> bool:
+        return trace.state.done
+
+    @vf.reward(weight=1.0)
+    async def carla_reward(self, trace: vf.Trace) -> float:
+        return float(trace.state.reward)
+
+    @vf.metric
+    async def carla_metrics(self, trace: vf.Trace) -> dict[str, float]:
+        state = trace.state
+        counts = Counter(str(call.get("name") or "") for call in state.tool_calls)
+        metrics = {"total_tool_calls": float(len(state.tool_calls))}
+        metrics.update({f"{name}_calls": float(count) for name, count in counts.items() if name})
+        for name, value in state.scenario_outcome.items():
+            if isinstance(value, bool):
+                metrics[name] = float(value)
+            elif isinstance(value, int | float):
+                metrics[name] = float(value)
+        return metrics
+
+
+class CarlaTasksetConfig(vf.TasksetConfig):
+    scenario: str = "action_bias_saves"
+    env_args: dict[str, Any] = Field(default_factory=dict)
     num_tasks: int = Field(1, ge=1)
-    """Number of rows exposed from the configured dataset."""
+    task: CarlaTaskConfig = CarlaTaskConfig()
 
 
 class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
-    """Expose CARLA episodes through the Verifiers v1 taskset interface."""
+    """Yield independent instances of one configured CARLA scenario."""
 
     def load(self) -> Iterable[CarlaTask]:
         for idx in range(self.config.num_tasks):
             yield CarlaTask(
                 CarlaTaskData(
                     idx=idx,
-                    name=f"carla-{idx}",
+                    name=f"{self.config.scenario}-{idx}",
                     description="Complete the configured CARLA driving scenario.",
-                )
-            )
-
-
-class CarlaV1EnvConfig(EnvConfig):
-    agent: AgentConfig = AgentConfig()
-
-
-class CarlaV1Env(vf.Env[CarlaV1EnvConfig]):
-    """Run the established stateful CARLA rollout through the official v1 bridge."""
-
-    def __init__(self, config: CarlaV1EnvConfig) -> None:
-        super().__init__(config)
-        self._legacy_env = None
-        self._dataset = None
-        self._clients: dict[tuple[str, str], Any] = {}
-
-    async def start(self) -> None:
-        from .env import load_environment
-
-        taskset_config = self.taskset.config
-        if not isinstance(taskset_config, CarlaTasksetConfig):
-            raise TypeError("CarlaV1Env requires CarlaTasksetConfig")
-        self._legacy_env = load_environment(**taskset_config.env_args)
-        try:
-            self._dataset = self._legacy_env.get_dataset()
-        except ValueError:
-            self._dataset = self._legacy_env.get_eval_dataset()
-        if len(self._dataset) < taskset_config.num_tasks:
-            raise ValueError(
-                f"num_tasks={taskset_config.num_tasks} exceeds the configured "
-                f"dataset length ({len(self._dataset)})"
-            )
-
-    async def stop(self) -> None:
-        for client in self._clients.values():
-            close = getattr(client, "close", None)
-            if close is None:
-                continue
-            result = close()
-            if inspect.isawaitable(result):
-                await result
-        self._clients.clear()
-        self._dataset = None
-        self._legacy_env = None
-
-    async def run(self, task: Task, agents: Agents) -> None:
-        raise NotImplementedError("CarlaV1Env owns the bridged rollout lifecycle")
-
-    async def run_episode(
-        self,
-        task: Task,
-        ctx: ModelContext,
-        *,
-        on_trace: Callable[[Trace], None] | None = None,
-        on_discard: Callable[[Trace], None] | None = None,
-    ) -> Episode:
-        del on_discard
-        if self._legacy_env is None or self._dataset is None:
-            raise RuntimeError("CarlaV1Env is not serving")
-        task_idx = task.data.idx
-        if task_idx is None:
-            raise ValueError("CARLA tasks require an index")
-
-        key = (ctx.client.model_dump_json(), ctx.model)
-        client = self._clients.get(key)
-        if client is None:
-            client = legacy_client(ctx.client, ctx.model)
-            self._clients[key] = client
-
-        try:
-            output = await self._legacy_env.run_rollout(
-                input=dict(self._dataset[task_idx]),
-                client=client,
-                model=ctx.model,
-                sampling_args=ctx.sampling.model_dump(exclude_none=True),
-                state_columns=["trajectory"],
-            )
-            trace = legacy_output_to_trace(output, task)
-            if on_trace is not None:
-                on_trace(trace)
-            return Episode.of(trace, env=self.config.env_id)
-        except Exception as exc:  # noqa: BLE001 - the episode records its boundary failure
-            return Episode(
-                env=EnvInfo(id=self.config.env_id),
-                errors=[
-                    Error(
-                        type=type(exc).__name__,
-                        message=str(exc),
-                        traceback=traceback.format_exc(),
-                    )
-                ],
+                    prompt=(
+                        "Inspect the CARLA scenario through the available simulator interface, "
+                        "then complete its objective."
+                    ),
+                    scenario=self.config.scenario,
+                    env_args=dict(self.config.env_args),
+                ),
+                self.config.task,
             )

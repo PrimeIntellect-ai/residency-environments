@@ -177,8 +177,6 @@ class FreeRoamScenario(NavigationScenario):
     def build_system_prompt(self, state: Any) -> str:
         camera_available = bool(state.get("_camera_available", self.config.enable_vision))
         depth_available = bool(state.get("_depth_available", False))
-        observe_available = bool(state.get("_observe_available", self.observe_tool_enabled()))
-        motion_tools_enabled = self.motion_tools_enabled()
         replay_note = self.replay_readonly_note()
         vision_note = ""
         if self.config.enable_vision and not camera_available:
@@ -188,28 +186,10 @@ class FreeRoamScenario(NavigationScenario):
                 vision_note = (
                     "Front camera unavailable in this episode; rely on text observations only.\n\n"
                 )
-        tools = "Available tools:\n"
-        if observe_available:
-            tools += "- observe(): get current state\n"
-        if motion_tools_enabled:
-            tools += (
-                "- control_vehicle(throttle, steer): manual control\n"
-                "- brake_vehicle(intensity): apply brakes\n"
-                "- lane_change(direction): change lane left/right\n"
-                "- init_navigation_agent(behavior): start autopilot\n"
-                "- set_destination(x, y, z): set navigation goal\n"
-                "- follow_route(steps): follow planned route\n"
-                "- emergency_stop(): stop immediately\n"
-            )
-        if camera_available:
-            tools += "- capture_image(): capture the front RGB camera\n"
-        if depth_available:
-            tools += "- capture_depth(): capture the front depth camera\n"
         return (
-            "You control a vehicle in a free-roam driving environment.\n\n"
+            "Explore the free-roam driving environment safely.\n\n"
             "There is no fixed destination. Explore the environment, drive safely, "
             "and avoid collisions with other vehicles and pedestrians.\n\n"
             f"{replay_note}"
             f"{vision_note}"
-            f"{tools}"
         )

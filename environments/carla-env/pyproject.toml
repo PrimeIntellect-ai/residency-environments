@@ -15,7 +15,6 @@ keywords = ["agentic", "tool-use", "multi-turn", "robotics", "rl", "eval", "benc
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@c9da457",
-  "datasets>=3.0.0",
   "imageio>=2.34.0",
   "imageio-ffmpeg>=0.5.1",
   "numpy>=1.26.0",
@@ -68,7 +67,7 @@ allow-direct-references = true
 
 [tool.verifiers.eval]
 num_examples = 1
-rollouts_per_example = 1
+rollouts_per_example = 2
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
