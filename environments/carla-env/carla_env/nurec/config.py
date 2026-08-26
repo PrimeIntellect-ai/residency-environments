@@ -8,6 +8,10 @@ from typing import Any
 DEFAULT_NUREC_CAMERA_LOGICAL_ID = "camera_front_wide_120fov"
 
 
+def normalize_nurec_mode(mode: object) -> str:
+    return str(mode or "replay").strip().lower()
+
+
 @dataclass
 class NuRecConfig:
     """
@@ -30,6 +34,9 @@ class NuRecConfig:
     reuse_container: bool = True
     startup_timeout_s: float = 120.0
     sdk_path: str = ""
+
+    def __post_init__(self) -> None:
+        self.mode = normalize_nurec_mode(self.mode)
 
     @classmethod
     def from_obj(cls, obj: Any) -> "NuRecConfig":

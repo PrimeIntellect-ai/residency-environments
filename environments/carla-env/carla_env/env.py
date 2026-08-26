@@ -30,7 +30,7 @@ from .core import (
 )
 from .cosmos import CosmosConfig
 from .logging import configure_logging, get_logger
-from .nurec import NuRecConfig, NuRecManager
+from .nurec import NuRecConfig, NuRecManager, normalize_nurec_mode
 from .nurec.runtime import nurec_fixed_delta_seconds, sanitize_nurec_framerate
 from .rubrics import rubric_for_scenario
 from .sandbox import CarlaSandboxConfig, CarlaSandboxPool
@@ -192,12 +192,13 @@ class _EpisodeSemaphoreRegistry:
     """Process-wide concurrency guard so multiple CarlaEnv instances don't fight over the same CARLA server."""
 
     def __init__(self) -> None:
-        self._semas: dict[tuple[str, int], threading.BoundedSemaphore] = {}
-        self._max: dict[tuple[str, int], int] = {}
+        self._semas: dict[tuple[object, ...], threading.BoundedSemaphore] = {}
+        self._max: dict[tuple[object, ...], int] = {}
         self._lock = threading.Lock()
 
-    def get(self, host: str, port: int, max_concurrent_episodes: int) -> threading.BoundedSemaphore:
-        key = (str(host), int(port))
+    def get(
+        self, key: tuple[object, ...], max_concurrent_episodes: int
+    ) -> threading.BoundedSemaphore:
         n = max(1, int(max_concurrent_episodes))
 
         with self._lock:
@@ -210,9 +211,8 @@ class _EpisodeSemaphoreRegistry:
                 existing_n = self._max.get(key)
                 if existing_n is not None and existing_n != n:
                     logger.warning(
-                        "Episode concurrency mismatch for %s:%s (existing=%s, requested=%s); using existing.",
-                        host,
-                        port,
+                        "Episode concurrency mismatch for %s (existing=%s, requested=%s); using existing.",
+                        key,
                         existing_n,
                         n,
                     )
@@ -431,7 +431,9 @@ def _resolve_nurec_config(
     if nurec_camera_logical_id is not None:
         cfg.camera_logical_id = str(nurec_camera_logical_id)
     if nurec_mode is not None:
-        cfg.mode = str(nurec_mode)
+        cfg.mode = normalize_nurec_mode(nurec_mode)
+    else:
+        cfg.mode = normalize_nurec_mode(cfg.mode)
     if nurec_resolution_ratio is not None:
         cfg.resolution_ratio = float(nurec_resolution_ratio)
     if nurec_framerate is not None:
@@ -821,7 +823,14 @@ class CarlaEnv:
 
         host = str(config.host or "127.0.0.1")
         port = int(config.port or 2000)
-        self._episode_sema = _episode_semas.get(host, port, int(config.max_concurrent_episodes))
+        sandbox_mode = str(getattr(config.sandbox, "mode", "disabled")).lower()
+        if sandbox_mode == "disabled":
+            semaphore_key: tuple[object, ...] = ("local", host, port)
+            semaphore_limit = 1
+        else:
+            semaphore_key = ("sandbox", *config.sandbox.pool_key())
+            semaphore_limit = int(config.max_concurrent_episodes)
+        self._episode_sema = _episode_semas.get(semaphore_key, semaphore_limit)
 
         # Resolve NuRec before sandbox pool so version overrides take effect.
         self._nurec_mgr: NuRecManager | None = None
@@ -1028,7 +1037,7 @@ class CarlaEnv:
         try:
             if use_nurec:
                 world_mgr.snapshot_current_state()
-                nurec_mode = str(
+                nurec_mode = normalize_nurec_mode(
                     getattr(
                         scenario.config,
                         "nurec_mode",
@@ -1238,7 +1247,7 @@ class CarlaEnv:
 
             nurec_scn = self._nurec_mgr.nurec_scenario
             ego = nurec_scn.actor_mapping[EGO_TRACK_ID].actor_inst
-            nurec_mode = str(getattr(scenario.config, "nurec_mode", "replay"))
+            nurec_mode = normalize_nurec_mode(getattr(scenario.config, "nurec_mode", "replay"))
             if nurec_mode == "drive":
                 nurec_actor = nurec_scn.actor_mapping[EGO_TRACK_ID]
                 nurec_actor.physics = True
@@ -1583,7 +1592,7 @@ class CarlaEnv:
                         except Exception as nurec_exit_err:
                             logger.warning("NuRec exit during retry cleanup: %s", nurec_exit_err)
                         try:
-                            nurec_mode = str(
+                            nurec_mode = normalize_nurec_mode(
                                 getattr(
                                     scenario.config,
                                     "nurec_mode",
@@ -1773,10 +1782,6 @@ class CarlaEnv:
                 )
                 continue
 
-            # Track raw tool call only after all availability checks pass,
-            # so rejected calls don't influence scoring (e.g. trolley classification).
-            state["tool_calls"].append({"name": tool_name, "args": dict(parsed)})
-
             # Constant velocity is useful for trolley dilemmas (prevents "escape" via braking).
             # Only disable it for tools that need full speed-control authority (navigation agent).
             disable_const_vel_tools = {"follow_route"}
@@ -1806,6 +1811,7 @@ class CarlaEnv:
                     tool_messages.append(
                         {"role": "tool", "tool_call_id": tool_call_id, "content": obs.text}
                     )
+                state["tool_calls"].append({"name": tool_name, "args": dict(parsed)})
                 emitted_obs_via_tool = True
                 continue
 
@@ -1825,6 +1831,9 @@ class CarlaEnv:
                 pending_key = "_pending_image" if tool_name == "capture_image" else "_pending_depth"
                 b64_data = state.pop(pending_key, None)
                 tool_messages.append(tool_message)
+                if self._tool_message_is_error(tool_message):
+                    continue
+                state["tool_calls"].append({"name": tool_name, "args": dict(parsed)})
                 if b64_data:
                     label = (
                         "RGB image captured:"
@@ -1860,6 +1869,10 @@ class CarlaEnv:
                 continue
 
             tool_messages.append(tool_message)
+            if self._tool_message_is_error(tool_message):
+                state.pop("_tool_did_tick", None)
+                continue
+            state["tool_calls"].append({"name": tool_name, "args": dict(parsed)})
 
             # Restore constant velocity after motion tools to prevent braking from
             # bypassing the dilemma.
@@ -1991,6 +2004,13 @@ class CarlaEnv:
             state["final_env_response"] = env_messages
 
         return env_messages
+
+    @staticmethod
+    def _tool_message_is_error(message: dict[str, Any]) -> bool:
+        content = message.get("content")
+        return isinstance(content, str) and content.strip().lower().startswith(
+            ("error", "tool error")
+        )
 
     async def scenario_done(self, state: State, **kwargs) -> bool:
         return bool(state.get("done", False))

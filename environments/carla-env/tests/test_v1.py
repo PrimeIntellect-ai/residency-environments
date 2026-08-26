@@ -37,6 +37,12 @@ def test_taskset_builds_native_v1_task() -> None:
         ),
         (
             "navigation_vision",
+            {"enable_nurec": True, "nurec_mode": "DRIVE"},
+            {"control_vehicle", "capture_image", "get_goal_info"},
+            {"observe", "capture_depth"},
+        ),
+        (
+            "navigation_vision",
             {"enable_cosmos": True},
             {"capture_image", "capture_depth"},
             {"observe"},
@@ -66,7 +72,9 @@ async def test_toolset_registers_only_enabled_tools() -> None:
     assert "observe" in names
     assert "get_goal_info" in names
     assert "capture_image" not in names
-    observe_tool = next(tool for tool in server._tool_manager.list_tools() if tool.name == "observe")
+    observe_tool = next(
+        tool for tool in server._tool_manager.list_tools() if tool.name == "observe"
+    )
     assert observe_tool.output_schema is None
     await toolset._exit_stack.aclose()
 

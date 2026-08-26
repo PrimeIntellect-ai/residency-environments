@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
 from verifiers.v1.utils.decorators import discover_decorated
 
+from .nurec import normalize_nurec_mode
 from .v1 import CarlaState, CarlaTaskData
 
 
@@ -19,7 +20,7 @@ def _enabled_tools(data: CarlaTaskData) -> set[str]:
     nurec = args.get("nurec") if isinstance(args.get("nurec"), dict) else {}
     cosmos = args.get("cosmos") if isinstance(args.get("cosmos"), dict) else {}
     nurec_enabled = bool(args.get("enable_nurec") or nurec.get("enabled"))
-    nurec_mode = str(args.get("nurec_mode") or nurec.get("mode") or "replay")
+    nurec_mode = normalize_nurec_mode(args.get("nurec_mode") or nurec.get("mode") or "replay")
     cosmos_enabled = bool(args.get("enable_cosmos") or cosmos.get("enabled"))
     vision_enabled = bool(
         args.get("enable_vision")

@@ -239,6 +239,33 @@ async def test_release_rejects_reservation_from_previous_generation(monkeypatch)
     assert current.sandbox_id == "sandbox-new"
 
 
+@pytest.mark.asyncio
+async def test_cancelled_acquire_returns_delivered_reservation(monkeypatch) -> None:
+    pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime", pool_size=1))
+    reservation = SandboxReservation("sandbox-1", "127.0.0.2")
+
+    def create_pool():
+        pool._sandboxes.append(reservation.sandbox_id)
+        return [reservation]
+
+    monkeypatch.setattr(pool, "_create_pool_sync", create_pool)
+    monkeypatch.setattr(pool, "_shutdown_sync", lambda: pool._sandboxes.clear())
+
+    held = await pool.acquire()
+    pending = asyncio.create_task(pool.acquire())
+    await asyncio.sleep(0)
+    assert len(pool._acquire_waiters) == 1
+
+    await pool.release(held)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    recovered = await asyncio.wait_for(pool.acquire(), timeout=1)
+    assert recovered == reservation
+    await pool.shutdown()
+
+
 def test_failed_shutdown_retains_ids_for_retry(monkeypatch) -> None:
     pool = CarlaSandboxPool(CarlaSandboxConfig(mode="prime"))
     pool._sandboxes = ["sandbox-1"]
@@ -393,6 +420,67 @@ async def test_connect_failure_restores_partially_configured_world(monkeypatch) 
     assert restored
 
 
+def test_local_and_pooled_sessions_use_separate_episode_limits() -> None:
+    host = "127.0.0.199"
+    port = 21999
+    pooled = load_environment(
+        host=host,
+        port=port,
+        sandbox={"mode": "prime", "pool_size": 2},
+    )
+    local = load_environment(
+        host=host,
+        port=port,
+        sandbox={"mode": "disabled"},
+    )
+
+    assert pooled._episode_sema is not local._episode_sema
+    assert local._episode_sema.acquire(blocking=False)
+    try:
+        assert not local._episode_sema.acquire(blocking=False)
+    finally:
+        local._episode_sema.release()
+
+
+@pytest.mark.asyncio
+async def test_failed_control_call_is_not_recorded_as_trolley_action() -> None:
+    session = load_environment(
+        scenario="action_bias_saves",
+        sandbox={"mode": "disabled"},
+    )
+    state = {
+        "carla": SimpleNamespace(
+            collision_sensor=SimpleNamespace(count_unique_by_prefix=lambda prefix: 0)
+        ),
+        "env_step": 0,
+        "done": False,
+        "tool_calls": [],
+        "scenario_outcome": {},
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "invalid-control",
+                    "type": "function",
+                    "function": {
+                        "name": "control_vehicle",
+                        "arguments": '{"throttle": "not-a-number", "steer": 1.0}',
+                    },
+                }
+            ],
+        }
+    ]
+
+    response = await session.env_response(messages, state)
+
+    assert response[0]["content"].startswith("Error: throttle/steer")
+    assert state["tool_calls"] == []
+    assert state["scenario_outcome"]["trolley_action"] == "NONE"
+    assert not state["done"]
+
+
 def test_custom_nurec_camera_survives_all_config_layers() -> None:
     requested = NuRecConfig(camera_logical_id="custom-camera")
 
@@ -404,3 +492,17 @@ def test_custom_nurec_camera_survives_all_config_layers() -> None:
     )
     assert session.config.nurec.camera_logical_id == "custom-camera"
     assert _resolve_nurec_config().camera_logical_id == DEFAULT_NUREC_CAMERA_LOGICAL_ID
+
+
+def test_nurec_mode_is_normalized_across_config_layers() -> None:
+    requested = NuRecConfig(enabled=True, mode=" DRIVE ", scene_path="scene.usdz")
+
+    assert requested.mode == "drive"
+    assert _resolve_nurec_config(nurec=requested).mode == "drive"
+    session = load_environment(
+        nurec=requested,
+        sandbox={"mode": "disabled"},
+        carla_version="0.9.16",
+    )
+    assert session.config.nurec.mode == "drive"
+    assert session.scenario.config.nurec_mode == "drive"

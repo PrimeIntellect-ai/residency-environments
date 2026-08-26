@@ -396,7 +396,23 @@ class CarlaSandboxPool:
                 waiter = asyncio.get_running_loop().create_future()
                 self._acquire_waiters.append(waiter)
         try:
-            return await waiter
+            return await asyncio.shield(waiter)
+        except asyncio.CancelledError:
+            async with self._start_lock:
+                try:
+                    self._acquire_waiters.remove(waiter)
+                except ValueError:
+                    pass
+                if waiter.done() and not waiter.cancelled():
+                    try:
+                        reservation = waiter.result()
+                    except BaseException:
+                        pass
+                    else:
+                        self._release_locked(reservation)
+                elif not waiter.done():
+                    waiter.cancel()
+            raise
         finally:
             if not waiter.done():
                 waiter.cancel()
@@ -407,15 +423,18 @@ class CarlaSandboxPool:
 
     async def release(self, reservation: SandboxReservation) -> None:
         async with self._start_lock:
-            if not self._started or reservation.sandbox_id not in self._sandboxes:
-                return
-            while self._acquire_waiters:
-                waiter = self._acquire_waiters.popleft()
-                if waiter.done():
-                    continue
-                waiter.set_result(reservation)
-                return
-            self._ready.put_nowait(reservation)
+            self._release_locked(reservation)
+
+    def _release_locked(self, reservation: SandboxReservation) -> None:
+        if not self._started or reservation.sandbox_id not in self._sandboxes:
+            return
+        while self._acquire_waiters:
+            waiter = self._acquire_waiters.popleft()
+            if waiter.done():
+                continue
+            waiter.set_result(reservation)
+            return
+        self._ready.put_nowait(reservation)
 
     async def shutdown(self) -> None:
         async with self._start_lock:
