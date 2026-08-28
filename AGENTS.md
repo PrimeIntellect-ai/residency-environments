@@ -36,7 +36,7 @@ Namespaces are one honking great idea -- let's do more of those!
 
 ## Testing
 
-Write tests as plain functions with pytest fixtures. Don't use class-based tests.
+Don't add per-environment unit tests; environments are validated by actually running them (`uv run eval ...`). Repo-level package checks live in `tests/` and should not be modified.
 
 ## Git
 
