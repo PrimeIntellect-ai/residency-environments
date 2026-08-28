@@ -9,7 +9,7 @@ config:
       - p
       - summary
   MD060:
-    style: compact
+    style: aligned
 overrides:
   - filter:
       - README.md
