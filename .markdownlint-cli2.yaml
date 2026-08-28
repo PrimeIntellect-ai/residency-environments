@@ -4,12 +4,20 @@ config:
     allowed_elements:
       - br
       - details
+      - h3
       - img
       - p
       - summary
   MD060:
     style: compact
 overrides:
+  - filter:
+      - README.md
+    config:
+      MD029: false
+      MD036: false
+      MD041: false
+    combine: merge
   - filter:
       - CLAUDE.md
     config:
