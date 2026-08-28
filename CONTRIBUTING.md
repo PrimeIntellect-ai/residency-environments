@@ -1,6 +1,6 @@
 # Contributing
 
-Residents have write access and contribute through branches and pull requests.
+Residents contribute through pull requests from repository branches or forks.
 `main` only moves through reviewed PRs.
 
 1. Branch from `main`: `feat/<env-name>`, `fix/<...>`, or `chore/<...>`.
@@ -13,15 +13,13 @@ Residents have write access and contribute through branches and pull requests.
 
 - Ruff and package checks run on every PR update, including drafts.
 - Bugbot and Macroscope run automatically.
-- Environment changes require a real model integration test. Each new PR head
-  waits for a maintainer to approve access to integration credentials.
 
 ## Local checks
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest -n auto tests -m "not integration" -v
+uv run pytest -n auto tests -v
 ```
 
 Every environment needs a `pyproject.toml` and `README.md` and must build with
