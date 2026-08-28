@@ -38,8 +38,6 @@ Namespaces are one honking great idea -- let's do more of those!
 
 Don't add per-environment unit tests; environments are validated by actually running them (`uv run eval ...`). Repo-level package checks live in `tests/` and should not be modified.
 
-Where tests are warranted (repo-level checks), write them as plain functions with pytest fixtures. Don't use class-based tests.
-
 ## Git
 
 - **Branch prefixes**: use the following prefixes for branches: `feat/`, `fix/`, `chore/`
