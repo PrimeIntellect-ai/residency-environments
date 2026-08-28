@@ -55,6 +55,8 @@ Use this guidance when contributing to the `residency-environments` repository i
 - During development, install environments (`/environments`) from the project's root directory using editable, local installs as `uv pip install -e ./environments/<env-name>`. DO NOT install from within the environment directories.
 - Every directory under `environments/` is a Verifiers v1 environment; no naming suffix is required.
 - For synthetically generated environments, the data generation and validation code lives in a matching `generators/<env-name>/` directory (see `generators/README.md`).
+- Environment-specific support code that is not part of the installable package lives in `scripts/<env-name>/` (see `scripts/README.md`). This includes sandbox image definitions and build helpers.
+- Reusable configurations for testing and evaluating an environment live in `configs/<env-name>/` (see `configs/README.md`). Never commit credentials or other secrets in configuration files.
 - Every environment must declare its full-eval convention in `pyproject.toml` under `[tool.verifiers.eval]` (`num_examples`, `rollouts_per_example`); automated eval runs read it when no sample count is given. Infinite tasksets fall back to 50 examples.
 - To check an environment implementation, use the v1 `eval` CLI. Start with a single example and two rollouts so tasksets using group rewards can compare outputs.
 
@@ -81,7 +83,9 @@ Tasksets go in *environments*.
 
 Questions/task descriptions, and possibly gold standard answers go into a HuggingFace dataset. If there's large amounts of data that the model has to work with, which takes time to setup in a sandbox, ship it in sandbox images and reference them in the Huggingface dataset for every prompt, so that each task starts with the right sandbox.
 
-If the data is generated synthetically, the scripts belong under *generators*.
+If the data is generated synthetically, the generation and validation code belongs under *generators*.
+
+Supporting development code, such as sandbox image definitions and build helpers, belongs under *scripts*. Reusable test and evaluation settings belong under *configs*.
 
 The structure is always:
 
@@ -89,6 +93,10 @@ The structure is always:
   - `<env-name>/<code>`
 - generators
   - `<env-name>/<code>`  # if data is synthetically generated
+- scripts
+  - `<env-name>/<code>`  # if the environment needs supporting development code
+- configs
+  - `<env-name>/<config>`  # if reusable test or evaluation configurations exist
 
 ### On tools
 
