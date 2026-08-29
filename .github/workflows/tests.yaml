@@ -58,4 +58,4 @@ jobs:
             export CHANGED_ENVS="${{ steps.changed-envs.outputs.all_modified_files || 'none' }}"
             echo "CHANGED_ENVS: $CHANGED_ENVS"
           fi
-          uv run pytest -n auto tests -m "not integration" -v
+          uv run pytest -n auto tests -v
