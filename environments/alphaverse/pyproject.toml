@@ -19,10 +19,6 @@ dependencies = [
 num_examples = 5
 rollouts_per_example = 1
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
-
 [tool.uv.build-backend]
 module-name = [
     "alphaverse",

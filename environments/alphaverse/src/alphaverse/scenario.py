@@ -769,8 +769,8 @@ def create_populated_scenario(
             max_ramp_duration=cfg.cohort_demand_max_ramp_duration,
         )
     else:
-        # Keep the default ecology byte-for-byte compatible even in unit tests
-        # whose synthetic market-time scale is much smaller than one second.
+        # Keep the default ecology byte-for-byte compatible in small synthetic
+        # configurations whose market-time scale is much smaller than one second.
         cohort_demand_config = CohortDemandConfig(
             cohort_count=cfg.reservation_cohort_count,
             event_count=0,

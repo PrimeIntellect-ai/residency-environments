@@ -53,7 +53,6 @@ From the repository root:
 
 ```bash
 uv pip install -e ./environments/alphaverse
-uv run pytest environments/alphaverse/tests -q
 uv run ruff check ./environments/alphaverse
 uv run ruff format --check ./environments/alphaverse
 uv build ./environments/alphaverse
@@ -62,7 +61,7 @@ uv build ./environments/alphaverse
 Run the standard smoke evaluation with the bundled coding harness:
 
 ```bash
-uv run eval --taskset.id alphaverse -n 1 -r 2 --max-turns 4
+uv run --no-sync eval alphaverse -n 1 -r 2 --env.agent.max-turns 4
 ```
 
 The package also exposes `alphaverse_codex_harness`,
