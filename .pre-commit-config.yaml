@@ -6,11 +6,18 @@ repos:
         args: [--fix] # Optional: automatically fixes linting issues
       - id: ruff-format # Runs the formatter
 
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 1.0.0
+    hooks:
+      - id: mdformat
+        additional_dependencies: [mdformat-gfm==1.0.0]
+        files: ^(?:[^/]+\.md|\.github/.*\.md|environments/[^/]+/README\.md|(?:configs|generators|scripts)/.*\.md)$
+
   - repo: https://github.com/DavidAnson/markdownlint-cli2
     rev: v0.23.1
     hooks:
       - id: markdownlint-cli2
-        files: ^(?:[^/]+\.md|\.github/.*\.md|environments/[^/]+/README\.md|generators/.*\.md)$
+        files: ^(?:[^/]+\.md|\.github/.*\.md|environments/[^/]+/README\.md|(?:configs|generators|scripts)/.*\.md)$
 
   - repo: local
     hooks:
