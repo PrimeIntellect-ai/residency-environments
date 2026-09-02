@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 import verifiers.v1 as vf
@@ -10,58 +14,32 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
 from verifiers.v1.utils.decorators import discover_decorated
 
-from .nurec import normalize_nurec_mode
 from .v1 import CarlaState, CarlaTaskData
-
-
-def _config_value(config: object, name: str, default: object = None) -> object:
-    if isinstance(config, dict):
-        return config.get(name, default)
-    return getattr(config, name, default)
 
 
 def _enabled_tools(data: CarlaTaskData) -> set[str]:
     scenario = data.scenario
-    args = data.env_args
-    nurec = args.get("nurec")
-    cosmos = args.get("cosmos")
-    nurec_enabled = bool(args.get("enable_nurec") or _config_value(nurec, "enabled", False))
-    nurec_mode_arg = args.get("nurec_mode")
-    nurec_mode = normalize_nurec_mode(
-        _config_value(nurec, "mode", "replay") if nurec_mode_arg is None else nurec_mode_arg
-    )
-    cosmos_enabled = bool(args.get("enable_cosmos") or _config_value(cosmos, "enabled", False))
-    vision_override = args.get("enable_vision")
-    scenario_vision = scenario.startswith(("navigation_vision", "free_roam"))
-    vision_enabled = bool(
-        (scenario_vision if vision_override is None else vision_override)
-        or nurec_enabled
-        or cosmos_enabled
-    )
-
-    tools: set[str] = set()
-    if not (nurec_enabled and nurec_mode == "replay"):
+    tools = {
+        "control_vehicle",
+        "brake_vehicle",
+        "emergency_stop",
+        "lane_change",
+    }
+    if scenario.startswith(("maze", "navigation")):
         tools.update(
             {
-                "control_vehicle",
-                "brake_vehicle",
-                "emergency_stop",
-                "lane_change",
                 "init_navigation_agent",
                 "set_destination",
                 "follow_route",
+                "get_goal_info",
             }
         )
-    if scenario.startswith(("maze", "navigation")) and not (
-        nurec_enabled and nurec_mode == "replay"
-    ):
-        tools.add("get_goal_info")
-    if not scenario.startswith("navigation_vision") or (nurec_enabled and nurec_mode == "replay"):
+    elif scenario.startswith("free_roam"):
+        tools.update({"init_navigation_agent", "set_destination", "follow_route"})
+    if data.modality == "text":
         tools.add("observe")
-    if vision_enabled:
+    else:
         tools.add("capture_image")
-    if cosmos_enabled:
-        tools.add("capture_depth")
     return tools
 
 
@@ -69,6 +47,8 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
     """Own one simulator session and expose its controls to one rollout."""
 
     TOOL_PREFIX = None
+    EXTRAS = ("runtime",)
+    RUNTIME_PYTHON = "/opt/carla-env/bin/python"
 
     def __init__(self, config: vf.ToolsetConfig) -> None:
         super().__init__(config)
@@ -76,10 +56,69 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
         self._session = None
         self._session_state: dict[str, Any] | None = None
         self._initial_context = ""
+        self._carla_process: asyncio.subprocess.Process | None = None
 
     async def setup_task(self, task: CarlaTaskData) -> None:
         self._task_data = task
+        self._exit_stack.push_async_callback(self._stop_carla)
         self._exit_stack.push_async_callback(self._close_session)
+        await self._start_carla()
+
+    async def _start_carla(self) -> None:
+        if self._task_data is None:
+            raise RuntimeError("CARLA tool server did not receive task data")
+        root = Path(os.environ.get("CARLA_ROOT", "/home/carla"))
+        executable = root / "CarlaUnreal.sh"
+        if not executable.is_file():
+            raise FileNotFoundError(f"CARLA 0.10.0 executable not found: {executable}")
+        renderer = "-RenderOffScreen" if self._task_data.modality == "vision" else "-nullrhi"
+        command = [str(executable)]
+        if os.geteuid() == 0:
+            command = ["runuser", "-u", "carla", "--", *command]
+        self._carla_process = await asyncio.create_subprocess_exec(
+            *command,
+            renderer,
+            "-nosound",
+            "-carla-rpc-port=2000",
+            "-stdout",
+            "-FullStdOutLogOutput",
+            "-unattended",
+            cwd=str(root),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            async with asyncio.timeout(180):
+                while True:
+                    if self._carla_process.returncode is not None:
+                        raise RuntimeError(
+                            f"CARLA exited during startup with code {self._carla_process.returncode}"
+                        )
+                    try:
+                        reader, writer = await asyncio.open_connection("127.0.0.1", 2000)
+                    except OSError:
+                        await asyncio.sleep(1)
+                        continue
+                    writer.close()
+                    await writer.wait_closed()
+                    del reader
+                    break
+        except BaseException:
+            await self._stop_carla()
+            raise
+
+    async def _stop_carla(self) -> None:
+        process = self._carla_process
+        self._carla_process = None
+        if process is None or process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=10)
+        except TimeoutError:
+            process.kill()
+            with contextlib.suppress(Exception):
+                await process.wait()
 
     def register(self, mcp: FastMCP) -> None:
         if self._task_data is None:
@@ -100,24 +139,21 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
             return
         if self._task_data is None:
             raise RuntimeError("CARLA tool server did not receive task data")
-        if not self.state.endpoint_host or self.state.endpoint_port is None:
-            raise RuntimeError("CARLA task did not reserve a simulator endpoint")
 
         from .env import load_environment
 
         args = dict(self._task_data.env_args)
         args.update(
             {
-                "host": self.state.endpoint_host,
-                "port": self.state.endpoint_port,
-                "sandbox": {"mode": "disabled"},
-                "carla_version": self.state.carla_version,
-                "traffic_manager_enabled": self.state.traffic_manager_enabled,
+                "host": "127.0.0.1",
+                "port": 2000,
+                "traffic_manager_enabled": False,
+                "observation_mode": self._task_data.modality,
             }
         )
         session = load_environment(scenario=self._task_data.scenario, **args)
         session_state: dict[str, Any] = {}
-        await session.setup_state(session_state, external_endpoint_reserved=True)
+        await session.setup_state(session_state)
         self._session = session
         self._session_state = session_state
         prompt = session_state.get("prompt") or []
@@ -252,11 +288,6 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
     async def capture_image(self) -> CallToolResult:
         """Capture the current front RGB camera frame without advancing time."""
         return await self._call("capture_image", {})
-
-    @vf.tool
-    async def capture_depth(self) -> CallToolResult:
-        """Capture the current front depth frame without advancing time."""
-        return await self._call("capture_depth", {})
 
 
 if __name__ == "__main__":

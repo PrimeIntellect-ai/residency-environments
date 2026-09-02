@@ -20,7 +20,7 @@ logger = get_logger("sensors.camera")
 
 @dataclass
 class CameraConfig:
-    """Shared config for RGB and depth cameras."""
+    """Front RGB camera configuration."""
 
     width: int = 640
     height: int = 360

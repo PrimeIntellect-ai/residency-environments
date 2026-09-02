@@ -292,9 +292,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
     def build_system_prompt(self, state: Any) -> str:
         goal = state.get("scenario_data", {}).get("goal_location")
         camera_available = bool(state.get("_camera_available", self.config.enable_vision))
-        depth_available = bool(state.get("_depth_available", False))
         goal_info_available = bool(state.get("_goal_info_available", self.goal_info_enabled()))
-        replay_note = self.replay_readonly_note()
         goal_line = ""
         if goal_info_available and goal is not None:
             goal_line = (
@@ -302,48 +300,36 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
             )
         if self.config.vision_only:
             vision_note = "Inspect the road through the available vision observations.\n"
-            if not camera_available and depth_available:
-                vision_note = "RGB is unavailable; depth observations remain available.\n"
-            elif not camera_available and not depth_available:
+            if not camera_available:
                 vision_note = "Vision sensors unavailable in this episode.\n"
             objective_block = (
                 f"Goal: navigate to within {self.config.success_radius:.0f}m of the destination.\n"
                 f"{goal_line}"
                 "You may query coarse goal progress, but not directional hints.\n"
                 if goal_info_available
-                else "This replay does not use a live navigation goal.\n"
+                else "This task does not use a live navigation goal.\n"
             )
             return (
                 "Complete the vision-only navigation task.\n\n"
                 f"{objective_block}"
                 "You do not receive text observations about nearby actors, lanes, or goal distance.\n"
-                f"{replay_note}"
                 f"{vision_note}"
             )
         camera_note = ""
         if self.config.enable_vision and not camera_available:
-            if depth_available:
-                camera_note = "Front RGB camera unavailable in this episode; depth capture is still available.\n"
-            else:
-                camera_note = (
-                    "Front camera unavailable in this episode; rely on text observations only.\n"
-                )
+            camera_note = (
+                "Front camera unavailable in this episode; rely on text observations only.\n"
+            )
         objective_block = (
             f"Goal: navigate to within {self.config.success_radius:.0f}m of the destination.\n"
             "Avoid collisions with other vehicles and pedestrians.\n"
             f"{goal_line}"
             if goal_info_available
-            else "Goal-based navigation is disabled for this replay.\n"
+            else "Goal-based navigation is disabled for this task.\n"
         )
-        return f"Complete the open navigation task.\n\n{objective_block}{replay_note}{camera_note}"
+        return f"Complete the open navigation task.\n\n{objective_block}{camera_note}"
 
     def ticks_after_tool(self, tool_name: str, tool_args: dict, state: Any) -> int:
-        if tool_name in {"capture_image", "capture_depth", "get_goal_info", "follow_route"}:
+        if tool_name in {"capture_image", "get_goal_info", "follow_route"}:
             return 0
-        if state.get("_nurec_drive") and tool_name in {
-            "control_vehicle",
-            "brake_vehicle",
-            "emergency_stop",
-        }:
-            return max(4, int(round(float(self.config.nurec_framerate or 20.0) * 0.25)))
         return 0 if state.get("_tool_did_tick") else 1

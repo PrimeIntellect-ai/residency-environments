@@ -15,7 +15,6 @@ logger = get_logger("core.runtime")
 
 if TYPE_CHECKING:
     from ..sensors.camera import CameraSensor
-    from ..sensors.depth import DepthSensor
 
 
 @dataclass
@@ -33,7 +32,6 @@ class CarlaRuntime:
     text_sensor: TextSensor
     collision_sensor: CollisionSensor
     camera_sensor: Optional["CameraSensor"] = None
-    depth_sensor: Optional["DepthSensor"] = None
     tick_hook: Optional[Callable[[], object]] = None
 
     def tick(self, n: int) -> int:

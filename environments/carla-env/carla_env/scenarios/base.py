@@ -30,18 +30,6 @@ class ScenarioConfig:
     record_video: bool = False
     video_output_dir: str = "_out"
     video_fps: float = 20.0
-    # NuRec neural rendering (opt-in, requires CARLA 0.9.16).
-    enable_nurec: bool = False
-    nurec_mode: str = "replay"
-    nurec_scene_path: str = ""
-    nurec_resolution_ratio: float = 0.25
-    nurec_framerate: float = 20.0
-    # Cosmos Transfer2.5 sim2real stylization (opt-in).
-    enable_cosmos: bool = False
-    cosmos_server_url: str = ""
-    cosmos_prompt: str = (
-        "Dashcam view of a realistic city street with natural lighting, photorealistic, high detail"
-    )
 
 
 C = TypeVar("C", bound=ScenarioConfig)
@@ -55,30 +43,13 @@ class BaseScenario(ABC, Generic[C]):
         return False
 
     def goal_info_enabled(self) -> bool:
-        return self.supports_goal_info() and not (
-            bool(getattr(self.config, "enable_nurec", False))
-            and str(getattr(self.config, "nurec_mode", "replay")).strip().lower() == "replay"
-        )
+        return self.supports_goal_info()
 
     def motion_tools_enabled(self) -> bool:
-        return not (
-            bool(getattr(self.config, "enable_nurec", False))
-            and str(getattr(self.config, "nurec_mode", "replay")).strip().lower() == "replay"
-        )
+        return True
 
     def observe_tool_enabled(self) -> bool:
-        return not bool(getattr(self.config, "vision_only", False)) or (
-            bool(getattr(self.config, "enable_nurec", False))
-            and str(getattr(self.config, "nurec_mode", "replay")).strip().lower() == "replay"
-        )
-
-    def replay_readonly_note(self) -> str:
-        if self.motion_tools_enabled():
-            return ""
-        return (
-            "NuRec replay mode is read-only for this episode. "
-            "The prerecorded trajectory controls the ego vehicle, so driving tools are unavailable.\n"
-        )
+        return not bool(getattr(self.config, "vision_only", False))
 
     @abstractmethod
     def build_system_prompt(self, state: Any) -> str:

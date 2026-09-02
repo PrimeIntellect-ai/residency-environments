@@ -1,234 +1,66 @@
 # carla-env
 
-CARLA verifiers environment for autonomous-driving evaluation and RL.
+Native Verifiers v1 tasks for evaluating driving decisions in CARLA 0.10.0.
 
-| Field | Value |
-| --- | --- |
-| **Environment ID** | `carla-env` |
-| **Version** | `0.3.0` |
-| **Type** | Native Verifiers v1 taskset with a per-rollout MCP toolset |
+The environment exposes one 12-scenario task matrix in two observation modes:
 
-## Overview
+- `configs/carla-env/text.toml` runs the full matrix without rendering on Prime CPU sandboxes.
+- `configs/carla-env/vision.toml` runs the same matrix with RGB observations in a local GPU Docker runtime.
 
-Scenario families:
+Each rollout gets a task-scoped MCP tool server. The server starts CARLA in the same isolated runtime, owns the simulator connection, and exposes only the tools for the selected modality. Agent sandboxes have no direct network access to the CARLA RPC server.
 
-- `trolley_micro_*`: benchmark trolley dilemmas
-- `action_bias_*`, `bias_*`: action-vs-inaction trolley variants
-- `maze`: hidden-goal text navigation
-- `navigation*`: text-first open navigation with optional NPC vehicles/pedestrians
-- `navigation_vision*`: vision-first navigation with RGB camera access
-- `free_roam*`: open-ended driving with optional traffic
+## Scenario matrix
 
-Renderer modes:
+- `action_bias_saves`
+- `action_bias_less`
+- `action_bias_equal`
+- `trolley_micro_classic_3v1`
+- `trolley_micro_classic_5v1`
+- `trolley_micro_classic_1v1`
+- `trolley_micro_self_sacrifice`
+- `trolley_micro_footbridge_analog`
+- `trolley_micro_no_good_option`
+- `trolley_micro_escape_exists`
+- `trolley_micro_consistency_a`
+- `trolley_micro_consistency_b`
 
-- Native CARLA RGB cameras
-- NuRec neural rendering on CARLA 0.9.16
-- Cosmos Transfer2.5 stylized RGB via remote frame server
+The default configs evaluate all 12 scenarios with two rollouts each. Set `env.taskset.scenario` only for focused debugging.
 
-Observation modes:
+## Install and inspect
 
-- Text-first: trolley, action-bias, maze, `navigation*`
-- Vision-first: `navigation_vision*`
-
-Each rollout uses the standard v1 agent/harness path. `Task.setup` reserves an
-independent CARLA endpoint, the task-scoped MCP toolset owns the simulator
-session, and `Task.finalize` releases the endpoint. Rewards, metrics, stopping,
-and trace state use native v1 hooks and records.
-
-## Quickstart
+From the repository root:
 
 ```bash
-# Recommended today: run the validated Prime H100 flow.
-environments/carla-env/scripts/e2e_prime_h100_runtime.sh --stack both --runtime-image sinatras/carla-env-runtime:latest
-
-# Or run only NuRec / only Cosmos
-environments/carla-env/scripts/e2e_prime_h100_runtime.sh --stack nurec --runtime-image sinatras/carla-env-runtime:latest
-environments/carla-env/scripts/e2e_prime_h100_runtime.sh --stack cosmos --runtime-image sinatras/carla-env-runtime:latest
+uv pip install -e ./environments/carla-env
+uv run eval @ configs/carla-env/text.toml --dry-run
+uv run eval @ configs/carla-env/vision.toml --dry-run
 ```
 
-## Local Install
-
-The old “install one extra and immediately run” path is no longer the right
-default. The validated package install today is:
+Run either configuration with a model override:
 
 ```bash
-uv venv --python 3.12
-source .venv/bin/activate
-uv pip install --upgrade pip setuptools wheel
-
-# Validated local client path
-uv pip install -e "./environments/carla-env[carla9]"
-
-# If you need NuRec support
-uv pip install -e "./environments/carla-env[carla9,nurec]" "imageio[ffmpeg]" "huggingface_hub"
-
-# CARLA 0.10.0-only workflows still exist, but are not the main validated path
-# uv pip install -e "./environments/carla-env[carla10]"
+uv run eval @ configs/carla-env/text.toml -m <provider/model>
+uv run eval @ configs/carla-env/vision.toml -m <multimodal-provider/model>
 ```
 
-For Hugging Face-backed features like NuRec scene download and Cosmos gated
-weights, keep a repo-local `.env` with a valid token:
+## Runtime layout
+
+Both modes use a derived runtime image whose CARLA 0.10.0 base is pinned by digest. Text mode starts `CarlaUnreal.sh` with `-nullrhi`; vision mode uses `-RenderOffScreen` and requires a local Docker runtime with an NVIDIA GPU and working Vulkan graphics passthrough. The image carries Python 3.12, the environment package, the NVIDIA graphics capability request, and the matching CARLA client, so the evaluation worker host does not import or install CARLA.
+
+The repository-level image definition bakes the package, its CARLA 0.10.0 client, and all tool-server dependencies into the simulator image:
 
 ```bash
-cat > .env <<'EOF'
-HF_TOKEN=hf_your_token_here
-EOF
+scripts/carla-env/build-image.sh sinatras/carla-env-runtime:0.10.0-v1
 ```
 
-## Local CARLA Server
+The task configs and `CARLA_RUNTIME_IMAGE` pin the published runtime by its immutable manifest digest. The versioned tag above is retained only as the image build and publication target.
 
-Start a local CARLA 0.9.16 server explicitly before running the env:
-
-```bash
-docker run --rm \
-  --gpus all \
-  --runtime nvidia \
-  --network host \
-  --ipc=host \
-  --shm-size=8g \
-  -e XDG_RUNTIME_DIR=/tmp/runtime-carla \
-  -e NVIDIA_DRIVER_CAPABILITIES=all \
-  carlasim/carla:0.9.16 \
-  /bin/sh -lc 'mkdir -p /tmp/runtime-carla && chmod 700 /tmp/runtime-carla && cd /workspace && exec ./CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000 -stdout -FullStdOutLogOutput -unattended'
-```
-
-Then run examples. The `null` harness is the smallest built-in MCP-capable
-harness for direct simulator interaction:
-
-```bash
-uv run eval carla-env -m "openai/gpt-4.1-mini" \
-  --env.taskset.scenario maze \
-  --env.taskset.env-args '{"sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":2000,"carla_version":"0.9.16"}' \
-  --env.agent.harness.id null --env.agent.max-turns 4 \
-  -n 1 -r 2
-
-uv run eval carla-env -m "openai/gpt-4.1-mini" \
-  --env.taskset.scenario navigation_Town10HD_v1_p1 \
-  --env.taskset.env-args '{"sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":2000,"carla_version":"0.9.16"}' \
-  --env.agent.harness.id null --env.agent.max-turns 4 \
-  -n 1 -r 2
-
-uv run eval carla-env -m "qwen/qwen3-vl-8b-instruct" \
-  --env.taskset.scenario navigation_vision_Town10HD_v1_p1 \
-  --env.taskset.env-args '{"sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":2000,"carla_version":"0.9.16"}' \
-  --env.agent.harness.id null --env.agent.max-turns 4 \
-  -n 1 -r 2
-```
-
-## Pod Local Server
-
-On some GPU pods, nested Docker cannot unpack or launch the official `carlasim/carla`
-images even though the node has a usable NVIDIA GPU. For that case, use
-[`scripts/start_local_carla_on_pod.sh`](scripts/start_local_carla_on_pod.sh), which:
-
-- installs the required host packages
-- reuses a preinstalled CARLA root when available, or unpacks the official CARLA image onto the host
-- launches CARLA directly from the extracted rootfs on the host as a non-root user
-- uses `/ephemeral` or `/workspace` for large CARLA cache/rootfs data
-- can apply a Vulkan ICD override when the provider image needs it
-
-Example:
-
-```bash
-sudo environments/carla-env/scripts/start_local_carla_on_pod.sh start --mode vision --port 4000
-
-uv run eval carla-env -m "qwen/qwen3-vl-8b-instruct" \
-  --env.taskset.scenario navigation_vision_Town10HD_v1_p1 \
-  --env.taskset.env-args '{"sandbox":{"mode":"disabled"},"host":"127.0.0.1","port":4000,"carla_version":"0.10.0"}' \
-  --env.agent.harness.id null --env.agent.max-turns 4 \
-  -n 1 -r 2
-```
-
-## Stage 3 Rendering
-
-NuRec:
-
-- enable with `enable_nurec=True` and `nurec_scene_path=...`
-- forces `carla_version="0.9.16"`
-- supports `nurec_mode="replay"` and `nurec_mode="drive"`
-
-Cosmos:
-
-- enable with `enable_cosmos=True` and `cosmos_server_url="http://host:8080"`
-- keeps native CARLA depth capture when the depth sensor is available
-- degrades to raw CARLA RGB if the Cosmos server is unhealthy or stylization fails
-
-Operational helper:
-
-- [`scripts/cosmos_frame_server.py`](scripts/cosmos_frame_server.py) runs a long-lived FastAPI frame server for Cosmos stylization on a GPU host
-
-## Environment Args
-
-| Argument | Default | Description |
-| --- | --- | --- |
-| `--env.taskset.scenario` | `"action_bias_saves"` | Scenario identifier |
-| `host` | `$CARLA_HOST` or `127.0.0.1` | CARLA host |
-| `port` | `$CARLA_PORT` or `2000` | CARLA port |
-| `trolley_micro_scoring` | `"expected"` | `"expected"` or `"actual"` |
-| `sandbox` | `{"mode":"prime"}` | Prime sandbox config or local mode |
-| `traffic_manager_enabled` | `None` | Explicit TrafficManager opt-in/out |
-| `carla_version` | inherited | `0.10.0`, `0.9.16`, or `auto` (local only) |
-| `enable_nurec` | `False` | Enable NuRec neural rendering |
-| `nurec_scene_path` | `None` | Path to NuRec USDZ scene |
-| `nurec_mode` | `None` | `replay` or `drive` |
-| `enable_cosmos` | `False` | Enable Cosmos stylization |
-| `cosmos_server_url` | `None` | Cosmos frame server URL |
-
-## Scenario Names
-
-| Scenario | Description |
-| --- | --- |
-| `maze` | Hidden-goal text navigation |
-| `navigation` | Text-first open navigation |
-| `navigation_<Map>_v<N>_p<M>` | Text-first navigation with map, vehicles, pedestrians |
-| `navigation_vision` | Vision-first open navigation |
-| `navigation_vision_<Map>_v<N>_p<M>` | Vision-first navigation with map, vehicles, pedestrians |
-| `action_bias_saves` | Swerve avoids all pedestrians |
-| `action_bias_less` | Swerve hits fewer |
-| `action_bias_equal` | Equal harm either way |
-| `bias_<C>v<S>` | Custom action-bias setup |
-| `trolley_micro_<id>` | Benchmark trolley scenario |
+The tool server runs the copy of the package baked into the image, so any change under `carla_env/` requires rebuilding and republishing the image and bumping the digest before it takes effect.
 
 ## Tools
 
-Common tools:
+The matrix exposes `control_vehicle`, `brake_vehicle`, `emergency_stop`, and `lane_change`. Text tasks additionally expose `observe`; vision tasks expose `capture_image` and do not reveal the scenario geometry in their prompts.
 
-- `control_vehicle(throttle, steer)`
-- `brake_vehicle(intensity)`
-- `emergency_stop()`
-- `lane_change(direction)`
-- `init_navigation_agent(behavior)`
-- `set_destination(x, y, z)`
-- `follow_route(steps)`
-- `get_goal_info()`
+## Package boundary
 
-Text-first only:
-
-- `observe()`
-
-Vision-first only:
-
-- `capture_image()`
-
-Cosmos-enabled vision episodes only:
-
-- `capture_depth()`
-
-`get_goal_info()` behavior:
-
-- `maze` and `navigation*`: `distance_to_goal_m=... direction=... improving=...`
-- `navigation_vision*`: `distance_to_goal_m=... improving=...`
-
-## Notes
-
-- The validated install path today is Python 3.12 + `.[carla9]`.
-- `.[carla10]` is still available for CARLA 0.10.0-only workflows, but it is not the main validated renderer path.
-- NuRec requires `.[carla9,nurec]`, a valid `nurec_scene_path`, and Hugging Face auth.
-- The most reliable full deployment path today is the Prime H100 wrapper in `scripts/e2e_prime_h100_runtime.sh`.
-- `navigation*` defaults to `traffic_manager_enabled=False`. TrafficManager is opt-in only.
-- Sandbox startup defaults are mode-aware:
-  - text-only scenarios: `./CarlaUnreal.sh -nullrhi -nosound`
-  - vision scenarios: `./CarlaUnreal.sh -RenderOffScreen -nosound`
-- `navigation_vision*` does not expose normal text observations.
-- `navigation_vision*` does not include destination coordinates in the prompt.
-- `import carla_env` works without CARLA installed, but loading the environment still requires one of the CARLA client extras.
+The base package depends only on `verifiers>=0.3.0`, so task discovery and config loading do not import the CARLA client on the worker. The optional `runtime` extra pins `carla-ue5-api==0.10.0`; older CARLA clients and alternate renderers are not supported.

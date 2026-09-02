@@ -1,24 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import atexit
 import inspect
 import json
 import os
 import random
 import re
-import threading
 from dataclasses import dataclass
 from typing import Any, Dict
 
 import carla
 
 from .compat import (
-    CarlaVersion,
     available_maps,
-    detect_client_version,
-    parse_version,
-    validate_nurec_version,
 )
 from .core import (
     ActorManager,
@@ -28,13 +22,8 @@ from .core import (
     WorldConfig,
     WorldManager,
 )
-from .cosmos import CosmosConfig
 from .logging import configure_logging, get_logger
-from .nurec import NuRecConfig, NuRecManager, normalize_nurec_mode
-from .nurec.runtime import nurec_fixed_delta_seconds, sanitize_nurec_framerate
 from .rubrics import rubric_for_scenario
-from .sandbox import CarlaSandboxConfig, CarlaSandboxPool
-from .sandbox.pool import DEFAULT_CARLA_START_CMD_TEXT, DEFAULT_CARLA_START_CMD_VISION
 from .scenarios import (
     ActionBiasConfig,
     ActionBiasScenario,
@@ -53,14 +42,10 @@ from .sensors import (
     CameraConfig,
     CameraSensor,
     CollisionSensor,
-    CosmosCameraSensor,
-    DepthSensor,
-    NuRecCameraSensor,
     TextSensor,
 )
 from .tools import (
     brake_vehicle,
-    capture_depth,
     capture_image,
     control_vehicle,
     emergency_stop,
@@ -78,52 +63,8 @@ Messages = list[dict[str, Any]]
 State = dict[str, Any]
 
 
-def _default_sandbox_start_command(version: str, wants_vision: bool) -> str:
-    parsed = parse_version(version)
-    if parsed == CarlaVersion.V0_9_16:
-        return (
-            "./CarlaUE4.sh -RenderOffScreen -nosound"
-            if wants_vision
-            else "./CarlaUE4.sh -nullrhi -nosound"
-        )
-    return DEFAULT_CARLA_START_CMD_VISION if wants_vision else DEFAULT_CARLA_START_CMD_TEXT
-
-
-def _normalize_map_name(map_name: str | None) -> str:
-    name = str(map_name or "").strip()
-    if not name:
-        return ""
-    name = name.rsplit("/", 1)[-1]
-    if name.endswith("_Opt"):
-        name = name[:-4]
-    return name
-
-
-def _map_matches(current_map: str | None, requested_map: str | None) -> bool:
-    current = _normalize_map_name(current_map)
-    requested = _normalize_map_name(requested_map)
-    return bool(current and requested and current == requested)
-
-
-def _scenario_motion_tools_enabled(config: Any) -> bool:
-    return not (
-        bool(getattr(config, "enable_nurec", False))
-        and str(getattr(config, "nurec_mode", "replay")).strip().lower() == "replay"
-    )
-
-
 def _scenario_exposes_vision_tools(config: Any) -> bool:
-    return bool(
-        getattr(config, "enable_vision", False)
-        or getattr(config, "enable_nurec", False)
-        or getattr(config, "enable_cosmos", False)
-    )
-
-
-def _scenario_exposes_depth_tools(config: Any) -> bool:
-    # Keep the legacy CARLA 0.10.0 vision contract RGB-only unless the caller
-    # explicitly opts into the newer Cosmos renderer path.
-    return bool(getattr(config, "enable_cosmos", False))
+    return bool(getattr(config, "enable_vision", False))
 
 
 def _scenario_needs_rendering(config: Any) -> bool:
@@ -131,47 +72,24 @@ def _scenario_needs_rendering(config: Any) -> bool:
 
 
 def _scenario_observe_enabled(config: Any) -> bool:
-    return not bool(getattr(config, "vision_only", False)) or (
-        bool(getattr(config, "enable_nurec", False))
-        and str(getattr(config, "nurec_mode", "replay")).strip().lower() == "replay"
-    )
+    return not bool(getattr(config, "vision_only", False))
 
 
 def _scenario_goal_info_enabled(config: Any, scenario: BaseScenario | None = None) -> bool:
     if scenario is not None:
         return bool(scenario.goal_info_enabled())
-    return bool(
-        getattr(config, "supports_goal_info", lambda: False)()
-        and not (
-            bool(getattr(config, "enable_nurec", False))
-            and str(getattr(config, "nurec_mode", "replay")).strip().lower() == "replay"
-        )
-    )
+    return bool(getattr(config, "supports_goal_info", lambda: False)())
 
 
-def _apply_renderer_config_to_scenario(config: "CarlaEnvConfig", scenario: BaseScenario) -> None:
-    if config.nurec and config.nurec.enabled:
-        scenario.config.enable_nurec = True
-        scenario.config.nurec_mode = str(config.nurec.mode)
-        scenario.config.nurec_scene_path = str(config.nurec.scene_path)
-        scenario.config.nurec_camera_logical_id = str(config.nurec.camera_logical_id)
-        scenario.config.nurec_resolution_ratio = float(config.nurec.resolution_ratio)
-        scenario.config.nurec_framerate = float(config.nurec.framerate)
-    if config.cosmos and config.cosmos.enabled:
-        scenario.config.enable_cosmos = True
-        scenario.config.cosmos_server_url = str(config.cosmos.server_url)
-        scenario.config.cosmos_prompt = str(config.cosmos.prompt)
-
-
-def _validate_map_for_version(map_name: str | None, version: CarlaVersion, *, source: str) -> None:
-    if not map_name or version == CarlaVersion.AUTO:
+def _validate_map(map_name: str | None, *, source: str) -> None:
+    if not map_name:
         return
 
     # Extract bare map name from full CARLA paths like /Game/Carla/Maps/Town10HD_Opt
     normalized_map = str(map_name).rsplit("/", 1)[-1]
     if normalized_map.endswith("_Opt"):
         normalized_map = normalized_map[:-4]
-    supported = available_maps(version)
+    supported = available_maps()
     if normalized_map in supported:
         return
 
@@ -179,85 +97,12 @@ def _validate_map_for_version(map_name: str | None, version: CarlaVersion, *, so
     # connected server even if they are not in the built-in allowlist.
     supported_text = ", ".join(supported)
     logger.warning(
-        "%s map %r is not in the known map list for CARLA %s (%s). "
+        "%s map %r is not in the known map list for CARLA 0.10.0 (%s). "
         "If this is a custom map, ensure the server has it loaded.",
         source,
         map_name,
-        version.value,
         supported_text,
     )
-
-
-class _EpisodeSemaphoreRegistry:
-    """Process-wide concurrency guard so multiple CarlaEnv instances don't fight over the same CARLA server."""
-
-    def __init__(self) -> None:
-        self._semas: dict[tuple[object, ...], threading.BoundedSemaphore] = {}
-        self._max: dict[tuple[object, ...], int] = {}
-        self._lock = threading.Lock()
-
-    def get(
-        self, key: tuple[object, ...], max_concurrent_episodes: int
-    ) -> threading.BoundedSemaphore:
-        n = max(1, int(max_concurrent_episodes))
-
-        with self._lock:
-            sema = self._semas.get(key)
-            if sema is None:
-                sema = threading.BoundedSemaphore(n)
-                self._semas[key] = sema
-                self._max[key] = n
-            else:
-                existing_n = self._max.get(key)
-                if existing_n is not None and existing_n != n:
-                    logger.warning(
-                        "Episode concurrency mismatch for %s (existing=%s, requested=%s); using existing.",
-                        key,
-                        existing_n,
-                        n,
-                    )
-            return sema
-
-    @staticmethod
-    async def acquire(sema: threading.BoundedSemaphore, *, poll_s: float = 0.05) -> None:
-        """Cancellation-safe async acquire for a thread semaphore."""
-        while True:
-            if sema.acquire(blocking=False):
-                return
-            await asyncio.sleep(poll_s)
-
-
-class _SandboxPoolHolder:
-    """Process-wide cache of CARLA sandbox pools keyed by effective config."""
-
-    def __init__(self) -> None:
-        self._pools: dict[tuple[tuple[str, object], ...], CarlaSandboxPool] = {}
-        self._atexit_registered = False
-        self._lock = threading.Lock()
-
-    def get(self, config: CarlaSandboxConfig) -> CarlaSandboxPool:
-        key = config.pool_key()
-        with self._lock:
-            pool = self._pools.get(key)
-            if pool is None:
-                pool = CarlaSandboxPool(config)
-                self._pools[key] = pool
-                if not self._atexit_registered:
-                    atexit.register(self._shutdown)
-                    self._atexit_registered = True
-            return pool
-
-    def _shutdown(self) -> None:
-        for pool in list(self._pools.values()):
-            try:
-                pool._shutdown_sync()
-            except Exception:  # noqa: BLE001
-                pass
-        self._pools.clear()
-
-
-_episode_semas = _EpisodeSemaphoreRegistry()
-_sandbox_pool_holder = _SandboxPoolHolder()
 
 
 def _valid_adjacent(base: carla.Waypoint, neighbor: carla.Waypoint | None) -> bool:
@@ -413,98 +258,6 @@ def _select_spawn_transform(
     return random.choice(best_sps)
 
 
-def _resolve_nurec_config(
-    *,
-    enable_nurec: bool = False,
-    nurec_scene_path: str | None = None,
-    nurec_camera_logical_id: str | None = None,
-    nurec_mode: str | None = None,
-    nurec_resolution_ratio: float | None = None,
-    nurec_framerate: float | None = None,
-    nurec: NuRecConfig | dict | None = None,
-) -> NuRecConfig:
-    cfg = NuRecConfig.from_obj(nurec)
-    if enable_nurec:
-        cfg.enabled = True
-    if nurec_scene_path is not None:
-        cfg.scene_path = str(nurec_scene_path)
-    if nurec_camera_logical_id is not None:
-        cfg.camera_logical_id = str(nurec_camera_logical_id)
-    if nurec_mode is not None:
-        cfg.mode = normalize_nurec_mode(nurec_mode)
-    else:
-        cfg.mode = normalize_nurec_mode(cfg.mode)
-    if nurec_resolution_ratio is not None:
-        cfg.resolution_ratio = float(nurec_resolution_ratio)
-    if nurec_framerate is not None:
-        cfg.framerate = float(nurec_framerate)
-    if cfg.enabled:
-        if cfg.mode not in {"replay", "drive"}:
-            raise ValueError("NuRec mode must be 'replay' or 'drive'")
-        if not str(cfg.scene_path or "").strip():
-            raise ValueError(
-                "NuRec is enabled but no scene path was provided. "
-                "Set nurec_scene_path or nurec.scene_path."
-            )
-    return cfg
-
-
-def _resolve_cosmos_config(
-    *,
-    enable_cosmos: bool = False,
-    cosmos_server_url: str | None = None,
-    cosmos_prompt: str | None = None,
-    cosmos: CosmosConfig | dict | None = None,
-) -> CosmosConfig:
-    cfg = CosmosConfig.from_obj(cosmos)
-    if enable_cosmos:
-        cfg.enabled = True
-    if cosmos_server_url is not None:
-        cfg.server_url = str(cosmos_server_url)
-    if cosmos_prompt is not None:
-        cfg.prompt = str(cosmos_prompt)
-    return cfg
-
-
-def _resolve_effective_carla_version(
-    requested_version: str | None,
-    *,
-    nurec_cfg: NuRecConfig | None = None,
-) -> str | None:
-    if nurec_cfg is not None and nurec_cfg.enabled:
-        if requested_version is not None and parse_version(requested_version) not in (
-            CarlaVersion.AUTO,
-            CarlaVersion.V0_9_16,
-        ):
-            validate_nurec_version(requested_version)
-        return CarlaVersion.V0_9_16.value
-    return requested_version
-
-
-def _validate_renderer_config(
-    nurec_cfg: NuRecConfig | None, cosmos_cfg: CosmosConfig | None
-) -> None:
-    if bool(nurec_cfg and nurec_cfg.enabled) and bool(cosmos_cfg and cosmos_cfg.enabled):
-        raise ValueError(
-            "NuRec and Cosmos cannot be enabled together in the same episode. "
-            "NuRec uses its own camera/rendering path, so Cosmos stylization would be ignored. "
-            "Choose exactly one renderer."
-        )
-
-
-def _validate_scenario_renderer_compatibility(scenario: BaseScenario) -> None:
-    if (
-        bool(getattr(scenario.config, "enable_nurec", False))
-        and str(getattr(scenario.config, "nurec_mode", "replay")).strip().lower() == "replay"
-        and isinstance(scenario, (ActionBiasScenario, TrolleyMicroScenario))
-    ):
-        raise ValueError(
-            f"NuRec replay mode is not supported for action-driven scenario "
-            f"{scenario.config.name!r}. Use nurec_mode='drive' or choose "
-            f"a read-only scenario (navigation, free_roam, maze)."
-        )
-
-
 @dataclass
 class CarlaEnvConfig:
     host: str | None = None
@@ -517,26 +270,11 @@ class CarlaEnvConfig:
     fixed_delta_seconds: float = 0.05
     weather: str = "ClearNoon"
 
-    # Concurrent episodes against the same CARLA world are unsupported in local mode.
-    # Use Prime sandbox pooling (mode="prime") or separate CARLA servers.
-    max_concurrent_episodes: int = 1
-
     # "expected" (benchmark-based) or "actual" (collision sensor).
     trolley_micro_scoring: str = "expected"
-
-    # Prime sandbox pool for CARLA servers (default: mode="prime").
-    # Pass {"mode": "disabled"} for local CARLA.
-    sandbox: CarlaSandboxConfig | dict | None = None
-
-    # Auto-disabled in sandbox mode; auto-enabled locally.
-    traffic_manager_enabled: bool | None = None
+    traffic_manager_enabled: bool = False
     # TrafficManager port. None means use CARLA default (8000).
     tm_port: int | None = None
-    # "0.10.0", "0.9.16", or "auto" (detect from running server).
-    # None means "inherit from sandbox config" (defaults to 0.10.0).
-    carla_version: str | None = None
-    nurec: NuRecConfig | dict | None = None
-    cosmos: CosmosConfig | dict | None = None
 
     def __post_init__(self) -> None:
         if not self.host:
@@ -554,57 +292,6 @@ class CarlaEnvConfig:
             self.port = _coerce_port(os.environ.get("CARLA_PORT", "2000"), 2000)
         else:
             self.port = _coerce_port(self.port, 2000)
-
-        self.nurec = _resolve_nurec_config(nurec=self.nurec)
-        self.cosmos = _resolve_cosmos_config(cosmos=self.cosmos)
-        _validate_renderer_config(self.nurec, self.cosmos)
-
-        effective_version = _resolve_effective_carla_version(
-            self.carla_version,
-            nurec_cfg=self.nurec,
-        )
-
-        # Normalize sandbox config to CarlaSandboxConfig. When the caller
-        # provided an explicit version, apply it before sandbox normalization so
-        # we never need client auto-detection to resolve an otherwise-ambiguous
-        # install.
-        self.sandbox = CarlaSandboxConfig.from_obj(self.sandbox, carla_version=effective_version)
-
-        sandbox_version = str(getattr(self.sandbox, "carla_version", "0.10.0"))
-        self.carla_version = (
-            sandbox_version if effective_version is None else parse_version(effective_version).value
-        )
-        if self.nurec.enabled:
-            validate_nurec_version(self.carla_version)
-
-        if self.traffic_manager_enabled is None:
-            self.traffic_manager_enabled = str(self.sandbox.mode).lower() == "disabled"
-        # TM requires explicit port exposure in sandbox mode.
-        if str(self.sandbox.mode).lower() != "disabled" and bool(self.traffic_manager_enabled):
-            if not bool(getattr(self.sandbox, "expose_traffic_manager", False)):
-                raise ValueError(
-                    "traffic_manager_enabled=True in sandbox mode requires sandbox.expose_traffic_manager=True "
-                    "(TrafficManager uses port 8000, which must be exposed/mapped per sandbox)."
-                )
-            if self.tm_port is not None and int(self.tm_port) != 8000:
-                raise ValueError(
-                    f"Custom tm_port={self.tm_port} is not supported in sandbox/Prime mode. "
-                    "The Prime sandbox tunnel only exposes TrafficManager on port 8000. "
-                    "Use tm_port=8000 (default) or mode='disabled' for custom TM ports."
-                )
-
-        # In pooled mode, default concurrency to pool_size so episodes run in parallel.
-        if int(self.max_concurrent_episodes) <= 1 and str(self.sandbox.mode).lower() != "disabled":
-            pool_size = int(getattr(self.sandbox, "pool_size", 1) or 1)
-            if pool_size > 1:
-                self.max_concurrent_episodes = pool_size
-
-        # Concurrent local episodes corrupt shared world state; require sandbox pooling.
-        if int(self.max_concurrent_episodes) > 1 and str(self.sandbox.mode).lower() == "disabled":
-            raise ValueError(
-                "max_concurrent_episodes > 1 is not supported without sandbox pooling. "
-                "Use sandbox.mode='prime' (pool_size >= 1) or run separate CARLA servers/ports."
-            )
 
 
 def _make_scenario(name: str) -> BaseScenario:
@@ -808,101 +495,22 @@ class CarlaEnv:
     def __init__(self, config: CarlaEnvConfig, scenario: BaseScenario):
         self.config = config
         self.scenario = scenario
-        _apply_renderer_config_to_scenario(config, scenario)
-        _validate_scenario_renderer_compatibility(scenario)
 
-        # Recompute the sandbox start command for the scenario. Direct
-        # construction may otherwise retain the wrong rendering mode.
-        if config.sandbox and str(config.sandbox.mode).lower() != "disabled":
-            if not config.sandbox._carla_start_command_explicit:
-                config.sandbox.carla_start_command = _default_sandbox_start_command(
-                    config.sandbox.carla_version,
-                    _scenario_needs_rendering(scenario.config),
-                )
-                config.sandbox._carla_start_command_explicit = False
-
-        host = str(config.host or "127.0.0.1")
-        port = int(config.port or 2000)
-        sandbox_mode = str(getattr(config.sandbox, "mode", "disabled")).lower()
-        if sandbox_mode == "disabled":
-            semaphore_key: tuple[object, ...] = ("local", host, port)
-            semaphore_limit = 1
-        else:
-            semaphore_key = ("sandbox", *config.sandbox.pool_key())
-            semaphore_limit = int(config.max_concurrent_episodes)
-        self._episode_sema = _episode_semas.get(semaphore_key, semaphore_limit)
-
-        # Resolve NuRec before sandbox pool so version overrides take effect.
-        self._nurec_mgr: NuRecManager | None = None
-        if config.nurec and config.nurec.enabled:
-            self._nurec_mgr = NuRecManager(config.nurec)
-        elif getattr(scenario.config, "enable_nurec", False):
-            # Scenario requests NuRec but CarlaEnvConfig didn't enable it —
-            # honor the scenario-level flag for direct CarlaEnv construction.
-            nurec_mode = str(getattr(scenario.config, "nurec_mode", "replay")).strip().lower()
-            if nurec_mode not in ("replay", "drive"):
-                raise ValueError(f"NuRec mode must be 'replay' or 'drive', got {nurec_mode!r}")
-            nurec_cfg_override = NuRecConfig(
-                enabled=True,
-                mode=nurec_mode,
-                scene_path=str(getattr(scenario.config, "nurec_scene_path", "")),
-                resolution_ratio=float(getattr(scenario.config, "nurec_resolution_ratio", 0.25)),
-                framerate=float(getattr(scenario.config, "nurec_framerate", 20.0)),
-            )
-            self._nurec_mgr = NuRecManager(nurec_cfg_override)
-            # NuRec requires 0.9.16 — override the env config version so the
-            # sandbox provisioning uses the right server image.
-            if (
-                config.carla_version is None
-                or parse_version(config.carla_version) != CarlaVersion.V0_9_16
-            ):
-                config.carla_version = CarlaVersion.V0_9_16.value
-                # Rebuild sandbox config with the corrected version.
-                if config.sandbox:
-                    config.sandbox = CarlaSandboxConfig.from_obj(
-                        config.sandbox, carla_version=config.carla_version
-                    )
-
-        self._sandbox_pool: CarlaSandboxPool | None = None
-        if config.sandbox and str(config.sandbox.mode).lower() != "disabled":
-            self._sandbox_pool = _sandbox_pool_holder.get(config.sandbox)
-
-        self._cosmos_cfg: CosmosConfig | None = None
-        if config.cosmos and config.cosmos.enabled:
-            self._cosmos_cfg = config.cosmos
-        elif getattr(scenario.config, "enable_cosmos", False):
-            # Build from scenario-level fields for direct CarlaEnv construction.
-            self._cosmos_cfg = CosmosConfig(
-                enabled=True,
-                server_url=str(getattr(scenario.config, "cosmos_server_url", "")),
-                prompt=str(getattr(scenario.config, "cosmos_prompt", "")),
-            )
-
-        # Reject mixed renderers on direct construction (same check load_environment does).
-        if self._nurec_mgr is not None and self._cosmos_cfg is not None:
-            raise ValueError("NuRec and Cosmos cannot both be enabled. Choose one renderer.")
-
-        tools = []
-        if _scenario_motion_tools_enabled(scenario.config):
-            tools.extend(
-                [
-                    control_vehicle,
-                    brake_vehicle,
-                    emergency_stop,
-                    lane_change,
-                    init_navigation_agent,
-                    set_destination,
-                    follow_route,
-                ]
-            )
+        tools = [
+            control_vehicle,
+            brake_vehicle,
+            emergency_stop,
+            lane_change,
+            init_navigation_agent,
+            set_destination,
+            follow_route,
+        ]
         if _scenario_goal_info_enabled(scenario.config, scenario):
             tools.append(get_goal_info)
         if _scenario_observe_enabled(scenario.config):
             tools.append(observe)
         if _scenario_exposes_vision_tools(scenario.config):
             tools.append(capture_image)
-            if _scenario_exposes_depth_tools(scenario.config):
-                tools.append(capture_depth)
         self.tool_map = {tool.__name__: tool for tool in tools}
 
     def update_tool_args(
@@ -931,49 +539,6 @@ class CarlaEnv:
             "content": str(result),
         }
 
-    async def reserve_endpoint(self, state: State) -> tuple[str, int]:
-        """Reserve one simulator endpoint for a v1 rollout."""
-        await _EpisodeSemaphoreRegistry.acquire(self._episode_sema)
-        state["_episode_sema_acquired"] = True
-        try:
-            host, port = await self._acquire_sandbox(state)
-        except BaseException:
-            state["_episode_sema_acquired"] = False
-            self._episode_sema.release()
-            raise
-        return str(host), int(port)
-
-    async def release_endpoint(self, state: State) -> None:
-        try:
-            sandbox_res = state.get("_sandbox_reservation")
-            if sandbox_res is not None and self._sandbox_pool is not None:
-                await self._sandbox_pool.release(sandbox_res)
-                state["_sandbox_reservation"] = None
-        finally:
-            if state.get("_episode_sema_acquired"):
-                state["_episode_sema_acquired"] = False
-                self._episode_sema.release()
-
-    async def _release_endpoint_cancellation_safe(self, state: State) -> None:
-        release_task = asyncio.create_task(self.release_endpoint(state))
-        try:
-            await asyncio.shield(release_task)
-        except asyncio.CancelledError:
-            await release_task
-            raise
-
-    async def _acquire_sandbox(self, state: State) -> tuple[Any, Any]:
-        """Acquire sandbox (if pooling) and return (host, port)."""
-        host = self.config.host
-        port = self.config.port
-        if self._sandbox_pool is not None:
-            sandbox_res = await self._sandbox_pool.acquire()
-            state["_sandbox_reservation"] = sandbox_res
-            state["sandbox_id"] = sandbox_res.sandbox_id
-            host = sandbox_res.host
-            port = sandbox_res.port
-        return host, port
-
     async def _connect_and_configure(
         self,
         host: Any,
@@ -992,37 +557,15 @@ class CarlaEnv:
             client_kwargs["tm_port"] = int(self.config.tm_port)
         client = CarlaClient(CarlaClientConfig(**client_kwargs))
         await client.connect_async()
-        expected_version = parse_version(self.config.carla_version)
-        if expected_version != CarlaVersion.AUTO and client.carla_version != expected_version:
+        if client.carla_version.value != "0.10.0":
             raise RuntimeError(
-                f"Connected CARLA server version {client.carla_version.value} does not match "
-                f"requested version {expected_version.value}. Either change carla_version or "
-                f"connect to a server running {expected_version.value}."
+                f"CARLA 0.10.0 is required, got server version {client.carla_version.value}."
             )
-        # Verify the locally imported carla Python package is compatible with
-        # the server to catch wheel/server mismatches early.
-        try:
-            local_client_version = detect_client_version()
-        except (ImportError, RuntimeError):
-            local_client_version = None  # No carla package or detection inconclusive
-        if local_client_version is not None and local_client_version != client.carla_version:
-            raise RuntimeError(
-                f"Installed CARLA Python client ({local_client_version.value}) does not match "
-                f"the connected server ({client.carla_version.value}). Install the matching "
-                f"client package or connect to a {local_client_version.value} server."
-            )
-        use_nurec = (
-            bool(getattr(scenario.config, "enable_nurec", False)) and self._nurec_mgr is not None
-        )
         map_name = getattr(scenario.config, "map_name", None)
-        try:
-            _validate_map_for_version(
-                map_name,
-                client.carla_version,
-                source=f"Scenario {getattr(scenario.config, 'name', 'unknown')}",
-            )
-        except ValueError as exc:
-            raise RuntimeError(str(exc)) from exc
+        _validate_map(
+            map_name,
+            source=f"Scenario {getattr(scenario.config, 'name', 'unknown')}",
+        )
 
         world_mgr = WorldManager(
             client,
@@ -1035,50 +578,15 @@ class CarlaEnv:
         )
         actors: ActorManager | None = None
         try:
-            if use_nurec:
-                world_mgr.snapshot_current_state()
-                nurec_mode = normalize_nurec_mode(
-                    getattr(
-                        scenario.config,
-                        "nurec_mode",
-                        getattr(self.config.nurec, "mode", "replay") or "replay",
-                    )
-                )
-                if nurec_mode == "drive":
-                    self._nurec_mgr.enter_drive_mode(client.client)
-                else:
-                    self._nurec_mgr.enter(client.client)
-                client._world = client.client.get_world()
-                client._map = client._world.get_map()
-                self._apply_nurec_world_configuration(world_mgr, scenario)
-                if map_name and not _map_matches(client._map.name, map_name):
-                    raise RuntimeError(
-                        f"NuRec scene map {client._map.name!r} does not match requested "
-                        f"scenario map {map_name!r}. Choose a scenario whose map matches "
-                        "the loaded NuRec scene."
-                    )
-            else:
-                world_mgr.configure(map_name=map_name)
-
+            world_mgr.configure(map_name=map_name)
             actors = ActorManager(world_mgr)
-            if not use_nurec and (
-                self._sandbox_pool is not None or int(self.config.max_concurrent_episodes) <= 1
-            ):
-                actors.cleanup_world()
+            actors.cleanup_world()
             for _ in range(3):
-                if use_nurec and self._nurec_mgr and self._nurec_mgr.is_active:
-                    self._nurec_mgr.nurec_scenario.tick()
-                else:
-                    world_mgr.tick()
+                world_mgr.tick()
         except BaseException:
             if actors is not None:
                 try:
                     actors.cleanup_tracked()
-                except Exception:
-                    pass
-            if use_nurec and self._nurec_mgr is not None and self._nurec_mgr.is_active:
-                try:
-                    self._nurec_mgr.exit()
                 except Exception:
                     pass
             try:
@@ -1089,42 +597,6 @@ class CarlaEnv:
 
         return client, world_mgr, actors
 
-    def _resolved_nurec_framerate(self, scenario: BaseScenario) -> float:
-        configured_fps = getattr(
-            scenario.config,
-            "nurec_framerate",
-            getattr(self.config.nurec, "framerate", None),
-        )
-        return sanitize_nurec_framerate(configured_fps)
-
-    def _apply_nurec_world_configuration(
-        self,
-        world_mgr: WorldManager,
-        scenario: BaseScenario,
-    ) -> None:
-        """
-        Let NuRec own replay timing while still syncing WorldManager state.
-
-        The March 1 direct scripts never reapplied CARLA settings after
-        `scenario.start_replay()`. Our wrapper still needs WorldManager state
-        aligned for cleanup and generic tooling, so centralize that handoff in
-        one place and validate the fixed delta immediately.
-        """
-        nurec_fps = self._resolved_nurec_framerate(scenario)
-        expected_dt = nurec_fixed_delta_seconds(nurec_fps)
-        world_mgr.config.sync_mode = True
-        world_mgr.config.fixed_delta_seconds = expected_dt
-        world_mgr.note_external_configuration()
-
-        settings = world_mgr.world.get_settings()
-        actual_dt = float(settings.fixed_delta_seconds or 0.0)
-        if not bool(settings.synchronous_mode) or abs(actual_dt - expected_dt) > 1e-6:
-            raise RuntimeError(
-                "NuRec requires synchronous CARLA ticking at "
-                f"{expected_dt:.6f}s, but the world is configured for "
-                f"sync={settings.synchronous_mode!r}, dt={actual_dt:.6f}s"
-            )
-
     def _setup_initial_velocity(
         self,
         scenario: BaseScenario,
@@ -1132,9 +604,6 @@ class CarlaEnv:
         state: State,
     ) -> None:
         """Set initial and optional constant velocity for trolley-style scenarios."""
-        if bool(state.get("_nurec_replay", False)):
-            state["_trolley_const_vel_ms"] = None
-            return
         if not isinstance(scenario, (ActionBiasScenario, TrolleyMicroScenario)):
             return
 
@@ -1178,49 +647,6 @@ class CarlaEnv:
             except Exception:
                 pass
 
-    def _update_nurec_replay_outcome(self, scenario: BaseScenario, state: State) -> None:
-        if not bool(state.get("_nurec_skip_goal_scoring", False)):
-            return
-
-        prev_reward = float((state.get("scenario_outcome") or {}).get("reward", 0.0) or 0.0)
-        replay_done = bool(state.get("_nurec_replay_done", False))
-        reward = 1.0 if replay_done else 0.0
-        replay_progress = reward
-
-        if self._nurec_mgr is not None and self._nurec_mgr.is_active:
-            try:
-                start_us, end_us = self._nurec_mgr.nurec_scenario.get_scenario_time_range()
-                current_us = self._nurec_mgr.nurec_scenario.get_sim_time()
-                duration_us = max(1, int(end_us) - int(start_us))
-                replay_progress = max(
-                    0.0,
-                    min(1.0, (int(current_us) - int(start_us)) / float(duration_us)),
-                )
-                reward = 1.0 if replay_done else float(replay_progress)
-            except Exception:
-                pass
-
-        outcome = {
-            "scenario": getattr(scenario.config, "name", "unknown"),
-            "reward": float(reward),
-            "step_reward": float(reward - prev_reward),
-            "replay_progress": float(replay_progress),
-            "replay_done": replay_done,
-        }
-        state.setdefault("scenario_outcome", {})
-        state["scenario_outcome"].update(outcome)
-
-    def _vision_only_replay_advance_message(self, state: State) -> str:
-        available_tools: list[str] = []
-        if bool(state.get("_camera_available", False)):
-            available_tools.append("capture_image()")
-        if bool(state.get("_depth_available", False)):
-            available_tools.append("capture_depth()")
-        if available_tools:
-            tool_hint = " or ".join(available_tools)
-            return f"Replay advanced by one step. Use {tool_hint} to inspect the updated scene."
-        return "Replay advanced by one step."
-
     def _try_spawn_attempt(
         self,
         scenario: BaseScenario,
@@ -1231,70 +657,21 @@ class CarlaEnv:
         spawn_tf: carla.Transform | None,
     ) -> CarlaRuntime:
         """Single spawn attempt: ego + sensors + velocity + scenario setup. Raises on failure."""
-        use_nurec = (
-            bool(getattr(scenario.config, "enable_nurec", False))
-            and self._nurec_mgr is not None
-            and self._nurec_mgr.is_active
-        )
-        use_cosmos = (
-            bool(getattr(scenario.config, "enable_cosmos", False)) and self._cosmos_cfg is not None
-        )
-
         state["_camera_available"] = False
-        state["_depth_available"] = False
         state["_observe_available"] = False
         state["_goal_info_available"] = False
-        state["_nurec_replay"] = False
-        state["_nurec_drive"] = False
-        state["_nurec_skip_goal_scoring"] = False
 
-        if use_nurec:
-            try:
-                from constants import EGO_TRACK_ID  # type: ignore[import-not-found,import-untyped]
-            except ImportError as exc:
-                raise RuntimeError(
-                    "NuRec SDK constants module is unavailable after manager setup"
-                ) from exc
-
-            nurec_scn = self._nurec_mgr.nurec_scenario
-            ego = nurec_scn.actor_mapping[EGO_TRACK_ID].actor_inst
-            nurec_mode = normalize_nurec_mode(getattr(scenario.config, "nurec_mode", "replay"))
-            if nurec_mode == "drive":
-                nurec_actor = nurec_scn.actor_mapping[EGO_TRACK_ID]
-                nurec_actor.physics = True
-                ego.set_simulate_physics(True)
-                state["_nurec_drive"] = True
-                logger.info("NuRec drive mode active; ego physics enabled for model control")
-            else:
-                state["_nurec_replay"] = True
-        else:
-            ego = actors.spawn_vehicle(
-                blueprint_filter=getattr(
-                    scenario.config, "vehicle_blueprint", "vehicle.lincoln.mkz"
-                ),
-                transform=spawn_tf,
-            )
-
-        # Skip warm-up ticks in NuRec replay — they consume irreplaceable
-        # opening frames of the prerecorded sequence.
-        nurec_replay_active = (
-            use_nurec
-            and self._nurec_mgr
-            and self._nurec_mgr.is_active
-            and str(getattr(scenario.config, "nurec_mode", "replay")).strip().lower() == "replay"
+        ego = actors.spawn_vehicle(
+            blueprint_filter=getattr(scenario.config, "vehicle_blueprint", "vehicle.lincoln.mkz"),
+            transform=spawn_tf,
         )
-        if not nurec_replay_active:
-            warmup_tick = world_mgr.tick
-            if use_nurec and self._nurec_mgr and self._nurec_mgr.is_active:
-                warmup_tick = self._nurec_mgr.nurec_scenario.tick
-            for _ in range(5):
-                warmup_tick()
+        for _ in range(5):
+            world_mgr.tick()
 
         collision = CollisionSensor(world_mgr.world, actors, ego)
         collision.setup()
         text_sensor = TextSensor(world_mgr.world, ego)
         camera_sensor = None
-        depth_sensor = None
         cam_cfg = CameraConfig(
             width=int(getattr(scenario.config, "camera_width", 640)),
             height=int(getattr(scenario.config, "camera_height", 360)),
@@ -1305,105 +682,20 @@ class CarlaEnv:
             video_fps=float(getattr(scenario.config, "video_fps", 20.0)),
         )
         vision_tools_enabled = _scenario_exposes_vision_tools(scenario.config)
-        depth_tools_enabled = _scenario_exposes_depth_tools(scenario.config)
         needs_rendering = _scenario_needs_rendering(scenario.config)
-        if use_nurec:
-            try:
-                camera_sensor = NuRecCameraSensor(
-                    nurec_scenario=self._nurec_mgr.nurec_scenario,
-                    parent_actor=ego,
-                    camera_logical_id=str(
-                        getattr(scenario.config, "nurec_camera_logical_id", "") or ""
-                    ),
-                    resolution_ratio=float(
-                        getattr(scenario.config, "nurec_resolution_ratio", 0.25)
-                    ),
-                    framerate=float(getattr(scenario.config, "nurec_framerate", 20.0)),
-                    jpeg_quality=int(getattr(scenario.config, "jpeg_quality", 75)),
-                    record_video=cam_cfg.record_video,
-                    output_dir=cam_cfg.output_dir,
-                    video_fps=cam_cfg.video_fps,
-                )
-                camera_sensor.setup()
-            except Exception as exc:
-                raise RuntimeError(f"Failed to setup NuRec camera: {exc}") from exc
-            if nurec_replay_active:
-                # Prime the replay just enough for the first RGB frame to exist.
-                # Without this, agents need multiple observe() turns before the
-                # first capture_image() succeeds, which effectively burns the
-                # opening frames anyway.
-                for _ in range(3):
-                    if camera_sensor.latest_frame is not None:
-                        break
-                    self._nurec_mgr.nurec_scenario.tick()
-                if camera_sensor.latest_frame is None:
-                    logger.warning(
-                        "NuRec replay camera did not produce an initial frame during startup priming"
-                    )
-            else:
-                for _ in range(3):
-                    self._nurec_mgr.nurec_scenario.tick()
-        elif use_cosmos:
-            try:
-                camera_sensor = CosmosCameraSensor(
-                    actor_manager=actors,
-                    parent=ego,
-                    cosmos_config=self._cosmos_cfg,
-                    camera_config=cam_cfg,
-                )
-                camera_sensor.setup()
-            except Exception as exc:
-                logger.warning(
-                    "Failed to setup CosmosCameraSensor; falling back to raw CameraSensor: %s", exc
-                )
-                camera_sensor = None
-            if camera_sensor is None:
-                try:
-                    camera_sensor = CameraSensor(actors, ego, config=cam_cfg)
-                    camera_sensor.setup()
-                except Exception as exc:
-                    logger.warning("Failed to setup fallback CameraSensor: %s", exc)
-                    camera_sensor = None
-            if depth_tools_enabled:
-                try:
-                    depth_sensor = DepthSensor(actors, ego, config=cam_cfg)
-                    depth_sensor.setup()
-                except Exception as exc:
-                    logger.warning("Failed to setup DepthSensor: %s", exc)
-                    depth_sensor = None
-            if (
-                bool(getattr(scenario.config, "vision_only", False))
-                and camera_sensor is None
-                and depth_sensor is None
-            ):
-                raise RuntimeError("Vision-only scenarios require a working RGB or depth sensor")
-            for _ in range(3):
-                world_mgr.tick()
-        elif needs_rendering:
+        if needs_rendering:
             try:
                 camera_sensor = CameraSensor(actors, ego, config=cam_cfg)
                 camera_sensor.setup()
             except Exception as exc:
                 logger.warning("Failed to setup CameraSensor: %s", exc)
                 camera_sensor = None
-            if depth_tools_enabled:
-                try:
-                    depth_sensor = DepthSensor(actors, ego, config=cam_cfg)
-                    depth_sensor.setup()
-                except Exception as exc:
-                    logger.warning("Failed to setup DepthSensor: %s", exc)
-                    depth_sensor = None
-            if (
-                bool(getattr(scenario.config, "vision_only", False))
-                and camera_sensor is None
-                and depth_sensor is None
-            ):
-                raise RuntimeError("Vision-only scenarios require a working RGB or depth sensor")
+            if bool(getattr(scenario.config, "vision_only", False)) and camera_sensor is None:
+                raise RuntimeError("Vision-only scenarios require a working RGB sensor")
             for _ in range(3):
                 world_mgr.tick()
 
         state["_camera_available"] = bool(camera_sensor is not None and vision_tools_enabled)
-        state["_depth_available"] = bool(depth_sensor is not None and depth_tools_enabled)
         state["_observe_available"] = bool(_scenario_observe_enabled(scenario.config))
         state["_goal_info_available"] = bool(_scenario_goal_info_enabled(scenario.config, scenario))
 
@@ -1415,36 +707,11 @@ class CarlaEnv:
             text_sensor=text_sensor,
             collision_sensor=collision,
             camera_sensor=camera_sensor,
-            depth_sensor=depth_sensor,
         )
-        if use_nurec and self._nurec_mgr and self._nurec_mgr.is_active:
-            runtime.tick_hook = self._nurec_mgr.nurec_scenario.tick
         state["carla"] = runtime
 
-        # In NuRec replay mode, skip goal-based scenario setup entirely — the
-        # prerecorded trajectory can't interact with sampled goals, and goal
-        # initialization can fail even though replay scoring ignores it.
-        nurec_replay = (
-            use_nurec
-            and str(getattr(scenario.config, "nurec_mode", "replay")).strip().lower() == "replay"
-        )
-        if nurec_replay:
-            if scenario.supports_goal_info():
-                state["_nurec_skip_goal_scoring"] = True
-                state.setdefault("scenario_data", {}).pop("goal_location", None)
-            else:
-                _saved_npcs = getattr(scenario.config, "num_npc_vehicles", 0)
-                _saved_peds = getattr(scenario.config, "num_pedestrians", 0)
-                scenario.config.num_npc_vehicles = 0
-                scenario.config.num_pedestrians = 0
-                try:
-                    scenario.setup(state)
-                finally:
-                    scenario.config.num_npc_vehicles = _saved_npcs
-                    scenario.config.num_pedestrians = _saved_peds
-        else:
-            self._setup_initial_velocity(scenario, ego, state)
-            scenario.setup(state)
+        self._setup_initial_velocity(scenario, ego, state)
+        scenario.setup(state)
 
         # Start recording only after scenario setup succeeds, so failed spawn
         # retries don't leak writer threads and temp directories.
@@ -1483,22 +750,16 @@ class CarlaEnv:
         world_mgr: WorldManager | None,
     ) -> None:
         rt = state.pop("carla", None)
-        if self._nurec_mgr is not None and self._nurec_mgr.is_active:
-            try:
-                self._nurec_mgr.exit()
-            except Exception:
-                pass
         if rt is not None:
-            for sensor in (rt.camera_sensor, rt.depth_sensor):
-                if sensor is not None:
-                    try:
-                        sensor.stop_recording()
-                    except Exception:
-                        pass
-                    try:
-                        sensor.destroy()
-                    except Exception:
-                        pass
+            if rt.camera_sensor is not None:
+                try:
+                    rt.camera_sensor.stop_recording()
+                except Exception:
+                    pass
+                try:
+                    rt.camera_sensor.destroy()
+                except Exception:
+                    pass
             try:
                 await rt.actors.cleanup_tracked_async()
             except Exception:
@@ -1522,14 +783,9 @@ class CarlaEnv:
     async def setup_state(
         self,
         state: State,
-        *,
-        external_endpoint_reserved: bool = False,
         **kwargs,
     ) -> State:
-        if external_endpoint_reserved:
-            host, port = self.config.host, self.config.port
-        else:
-            host, port = await self.reserve_endpoint(state)
+        host, port = self.config.host, self.config.port
 
         client: CarlaClient | None = None
         world_mgr: WorldManager | None = None
@@ -1558,7 +814,6 @@ class CarlaEnv:
                     scenario.reset(state)
                 state.pop("carla", None)
                 state.pop("_camera_available", None)
-                state.pop("_depth_available", None)
                 state.pop("_observe_available", None)
                 state.pop("_goal_info_available", None)
                 try:
@@ -1589,54 +844,15 @@ class CarlaEnv:
                     except Exception:
                         pass
                     try:
-                        rt = state.get("carla")
-                        sensor = getattr(rt, "depth_sensor", None) if rt is not None else None
-                        if sensor is not None and hasattr(sensor, "destroy"):
-                            sensor.destroy()
-                    except Exception:
-                        pass
-                    try:
                         actors.cleanup_tracked()
                     except Exception:
                         pass
                     state.pop("carla", None)
-                    if (
-                        bool(getattr(scenario.config, "enable_nurec", False))
-                        and self._nurec_mgr
-                        and self._nurec_mgr.is_active
-                    ):
-                        # Reset NuRec replay to initial state so the retry
-                        # starts from the same position as the first attempt.
+                    for _ in range(2):
                         try:
-                            self._nurec_mgr.exit()
-                        except Exception as nurec_exit_err:
-                            logger.warning("NuRec exit during retry cleanup: %s", nurec_exit_err)
-                        try:
-                            nurec_mode = normalize_nurec_mode(
-                                getattr(
-                                    scenario.config,
-                                    "nurec_mode",
-                                    getattr(self.config.nurec, "mode", "replay") or "replay",
-                                )
-                            )
-                            if nurec_mode == "drive":
-                                self._nurec_mgr.enter_drive_mode(client.client)
-                            else:
-                                self._nurec_mgr.enter(client.client)
-                            client._world = client.client.get_world()
-                            client._map = client._world.get_map()
-                            self._apply_nurec_world_configuration(world_mgr, scenario)
-                        except Exception as nurec_reenter_err:
-                            raise RuntimeError(
-                                f"NuRec replay re-entry failed during spawn retry; cannot "
-                                f"guarantee a valid NuRec episode: {nurec_reenter_err}"
-                            ) from nurec_reenter_err
-                    else:
-                        for _ in range(2):
-                            try:
-                                world_mgr.tick()
-                            except Exception:
-                                pass
+                            world_mgr.tick()
+                        except Exception:
+                            pass
 
             if runtime is None:
                 raise RuntimeError(
@@ -1644,17 +860,7 @@ class CarlaEnv:
                     f"after {max_attempts} spawn attempts: {last_err}"
                 ) from last_err
 
-            # Settle tick before first observation — replay startup already
-            # primes the minimum ticks needed for an initial RGB frame.
-            nurec_replay_settle = (
-                bool(getattr(scenario.config, "enable_nurec", False))
-                and self._nurec_mgr is not None
-                and self._nurec_mgr.is_active
-                and str(getattr(scenario.config, "nurec_mode", "replay")).strip().lower()
-                == "replay"
-            )
-            if not nurec_replay_settle:
-                runtime.tick(1)
+            runtime.tick(1)
 
             # Episode state init.
             state["env_step"] = 0
@@ -1670,22 +876,10 @@ class CarlaEnv:
 
             system_prompt = scenario.build_system_prompt(state)
             if bool(getattr(scenario.config, "vision_only", False)):
-                if bool(state.get("_camera_available", False)) and bool(
-                    state.get("_depth_available", False)
-                ):
-                    vision_instruction = (
-                        "Use capture_image() or capture_depth() to inspect the scene."
-                    )
-                elif bool(state.get("_camera_available", False)):
+                if bool(state.get("_camera_available", False)):
                     vision_instruction = "Use capture_image() to inspect the scene."
-                elif bool(state.get("_depth_available", False)):
-                    vision_instruction = "Use capture_depth() to inspect the scene."
                 else:
                     vision_instruction = "No vision capture tool is available."
-                if bool(state.get("_observe_available", False)):
-                    vision_instruction += (
-                        " Use observe() to advance the replay without receiving text observations."
-                    )
                 state["observation"] = ""
                 state["prompt"] = [
                     {"role": "system", "content": system_prompt},
@@ -1708,18 +902,7 @@ class CarlaEnv:
 
             return state
         except BaseException:
-            try:
-                await self._cleanup_failed_setup(state, actors, world_mgr)
-            finally:
-                try:
-                    await self._release_endpoint_cancellation_safe(state)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as release_error:
-                    logger.warning(
-                        "Failed to release CARLA endpoint after setup failure: %s",
-                        release_error,
-                    )
+            await self._cleanup_failed_setup(state, actors, world_mgr)
             raise
 
     async def env_response(self, messages: Messages, state: State, **kwargs) -> Messages:
@@ -1727,7 +910,6 @@ class CarlaEnv:
 
         scenario = self.scenario
         runtime: CarlaRuntime = state["carla"]
-        nurec_replay = bool(state.get("_nurec_replay", False))
 
         tool_messages: Messages = []
         emitted_obs_via_tool = False
@@ -1792,16 +974,6 @@ class CarlaEnv:
                     }
                 )
                 continue
-            if tool_name == "capture_depth" and not bool(state.get("_depth_available", False)):
-                tool_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": "Error: tool 'capture_depth' is not available in this episode",
-                    }
-                )
-                continue
-
             # Constant velocity is useful for trolley dilemmas (prevents "escape" via braking).
             # Only disable it for tools that need full speed-control authority (navigation agent).
             disable_const_vel_tools = {"follow_route"}
@@ -1826,7 +998,7 @@ class CarlaEnv:
                         {
                             "role": "tool",
                             "tool_call_id": tool_call_id,
-                            "content": "Replay advanced. No text observation is available in this vision-only scenario.",
+                            "content": "Simulator advanced. No text observation is available in this vision-only scenario.",
                         }
                     )
                 else:
@@ -1839,7 +1011,7 @@ class CarlaEnv:
                 emitted_obs_via_tool = True
                 continue
 
-            if tool_name in ("capture_image", "capture_depth"):
+            if tool_name == "capture_image":
                 tool_args = self.update_tool_args(tool_name, parsed, messages, state, **kwargs)
                 try:
                     tool_message = await self.call_tool(tool_name, tool_args, tool_call_id)
@@ -1852,23 +1024,17 @@ class CarlaEnv:
                         }
                     )
                     continue
-                pending_key = "_pending_image" if tool_name == "capture_image" else "_pending_depth"
-                b64_data = state.pop(pending_key, None)
+                b64_data = state.pop("_pending_image", None)
                 tool_messages.append(tool_message)
                 if self._tool_message_is_error(tool_message):
                     continue
                 state["tool_calls"].append({"name": tool_name, "args": dict(parsed)})
                 if b64_data:
-                    label = (
-                        "RGB image captured:"
-                        if tool_name == "capture_image"
-                        else "Depth image captured:"
-                    )
                     tool_messages.append(
                         {
                             "role": "user",
                             "content": [
-                                {"type": "text", "text": label},
+                                {"type": "text", "text": "RGB image captured:"},
                                 {
                                     "type": "image_url",
                                     "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"},
@@ -1915,7 +1081,7 @@ class CarlaEnv:
             tool_did_tick = bool(state.get("_tool_did_tick", False))
 
             # Scenario-driven time advance.
-            if tool_name in {"capture_image", "capture_depth"}:
+            if tool_name == "capture_image":
                 ticks = 0
             else:
                 try:
@@ -1931,37 +1097,20 @@ class CarlaEnv:
             # Reset per-tool tick flag.
             state.pop("_tool_did_tick", None)
 
-        # Advance time on inaction for trolley-style scenarios and NuRec
-        # replay episodes (where observe() is the only tool and the model
-        # may emit plain text between observations).
+        # Advance time on inaction for trolley-style scenarios.
         if not tool_calls and isinstance(scenario, (ActionBiasScenario, TrolleyMicroScenario)):
             ticks = int(getattr(scenario.config, "idle_ticks", 1) or 1)
             self._advance_time(runtime, ticks, state)
             turn_advanced_time = True
-        elif not tool_calls and nurec_replay and self._nurec_mgr and self._nurec_mgr.is_active:
-            self._advance_time(runtime, 1, state)
-            turn_advanced_time = True
-
-        if nurec_replay and self._nurec_mgr and self._nurec_mgr.is_active:
-            try:
-                if self._nurec_mgr.nurec_scenario.is_done():
-                    state["_nurec_replay_done"] = True
-            except Exception:
-                pass
 
         # Step counter + outcome check.
         state["env_step"] = int(state.get("env_step", 0)) + 1
         state["_turn_advanced_time"] = turn_advanced_time
 
-        # In NuRec replay mode for goal-based scenarios, synthesize a replay
-        # progress reward instead of goal-based navigation reward.
-        if bool(state.get("_nurec_skip_goal_scoring", False)):
-            self._update_nurec_replay_outcome(scenario, state)
-        else:
-            try:
-                scenario.compute_outcome(state)
-            except Exception as e:
-                logger.warning("Failed to compute outcome: %s", e)
+        try:
+            scenario.compute_outcome(state)
+        except Exception as e:
+            logger.warning("Failed to compute outcome: %s", e)
 
         rl_rubric = state.get("_rl_rubric")
         if rl_rubric is not None:
@@ -1971,9 +1120,7 @@ class CarlaEnv:
             except Exception:
                 pass
 
-        if bool(state.get("_nurec_replay_done", False)):
-            state["done"] = True
-        elif not bool(state.get("_nurec_skip_goal_scoring", False)) and scenario.is_done(state):
+        if scenario.is_done(state):
             state["done"] = True
         elif int(state.get("env_step", 0)) >= int(getattr(scenario.config, "max_steps", 500)):
             state["done"] = True
@@ -1989,20 +1136,6 @@ class CarlaEnv:
             obs = runtime.text_sensor.observe()
             state["observation"] = obs.text
             env_messages.append({"role": "user", "content": obs.text})
-        elif (
-            turn_advanced_time
-            and nurec_replay
-            and bool(getattr(scenario.config, "vision_only", False))
-            and not emitted_obs_via_tool
-            and not tool_calls
-        ):
-            state["observation"] = ""
-            env_messages.append(
-                {
-                    "role": "user",
-                    "content": self._vision_only_replay_advance_message(state),
-                }
-            )
 
         # If the scenario is done, stop the rollout without generating another model turn.
         # MultiTurnEnv will see final_env_response and terminate cleanly.
@@ -2048,19 +1181,9 @@ class CarlaEnv:
                             state["video_path"] = video_path
                     except Exception:
                         pass
-                if self._nurec_mgr is not None and self._nurec_mgr.is_active:
-                    try:
-                        self._nurec_mgr.exit()
-                    except Exception:
-                        pass
                 if rt.camera_sensor is not None:
                     try:
                         rt.camera_sensor.destroy()
-                    except Exception:
-                        pass
-                if rt.depth_sensor is not None:
-                    try:
-                        rt.depth_sensor.destroy()
                     except Exception:
                         pass
                 try:
@@ -2072,19 +1195,11 @@ class CarlaEnv:
                 except Exception:
                     pass
         finally:
-            try:
-                await self._release_endpoint_cancellation_safe(state)
-            finally:
-                state.pop("_camera_available", None)
-                state.pop("_depth_available", None)
-                state.pop("_observe_available", None)
-                state.pop("_pending_depth", None)
-                state.pop("_pending_image", None)
-                state.pop("_nurec_replay", None)
-                state.pop("_nurec_drive", None)
-                state.pop("_nurec_replay_done", None)
-                state.pop("_vision_only", None)
-                state.pop("_rl_rubric", None)
+            state.pop("_camera_available", None)
+            state.pop("_observe_available", None)
+            state.pop("_pending_image", None)
+            state.pop("_vision_only", None)
+            state.pop("_rl_rubric", None)
 
 
 def load_environment(
@@ -2095,25 +1210,12 @@ def load_environment(
     timeout_s: float = 10.0,
     max_retries: int = 20,
     trolley_micro_scoring: str = "expected",
-    sandbox: CarlaSandboxConfig | dict | None = None,
-    traffic_manager_enabled: bool | None = None,
+    traffic_manager_enabled: bool = False,
     tm_port: int | None = None,
     log_level: str | int = "INFO",
-    enable_vision: bool | None = None,
+    observation_mode: str = "text",
     record_video: bool | None = None,
     video_output_dir: str | None = None,
-    carla_version: str | None = None,
-    enable_nurec: bool = False,
-    nurec_scene_path: str | None = None,
-    nurec_camera_logical_id: str | None = None,
-    nurec_mode: str | None = None,
-    nurec_resolution_ratio: float | None = None,
-    nurec_framerate: float | None = None,
-    nurec: NuRecConfig | dict | None = None,
-    enable_cosmos: bool = False,
-    cosmos_server_url: str | None = None,
-    cosmos_prompt: str | None = None,
-    cosmos: CosmosConfig | dict | None = None,
     **kwargs,
 ) -> CarlaEnv:
     """
@@ -2132,30 +1234,13 @@ def load_environment(
         port: CARLA server port. Defaults to ``$CARLA_PORT`` or ``2000``.
         trolley_micro_scoring: ``"expected"`` (stable, benchmark-based) or
             ``"actual"`` (collision-sensor based) for trolley micro scenarios.
-        sandbox: Prime sandbox pool config dict or ``CarlaSandboxConfig``.
-            Defaults to ``mode="prime"`` (cloud CARLA instances).
-            Pass ``{"mode": "disabled"}`` for a local CARLA server.
         traffic_manager_enabled: Force-enable/disable CARLA TrafficManager.
-            Defaults to auto (disabled in sandbox mode, enabled locally).
         log_level: Logging level for carla_env loggers (e.g. ``"DEBUG"``,
             ``"INFO"``). Accepts string or ``logging`` int constants.
-        enable_vision: Override the scenario's vision setting.
+        observation_mode: ``"text"`` or ``"vision"``. Vision mode enables the
+            front RGB camera and suppresses text observations.
         record_video: Record episode video without changing tool observability.
         video_output_dir: Output directory for episode recordings.
-        carla_version: CARLA server version — ``"0.10.0"``, ``"0.9.16"``, or ``"auto"``.
-            When ``None`` (default), inherits from the sandbox config.
-        enable_nurec: Enable NuRec neural rendering.
-        nurec_scene_path: Path to the NuRec USDZ scene file.
-        nurec_camera_logical_id: Preferred NuRec reconstruction camera logical ID.
-            Default: camera_front_wide_120fov.
-        nurec_mode: NuRec mode — ``"replay"`` or ``"drive"``.
-        nurec_resolution_ratio: NuRec render size as a fraction of native.
-        nurec_framerate: NuRec rendering framerate.
-        nurec: Full ``NuRecConfig`` object or dict.
-        enable_cosmos: Enable Cosmos Transfer2.5 stylization.
-        cosmos_server_url: URL of the Cosmos frame server.
-        cosmos_prompt: Prompt describing the desired visual style.
-        cosmos: Full ``CosmosConfig`` object or dict.
     """
     if kwargs:
         names = ", ".join(sorted(kwargs))
@@ -2163,91 +1248,19 @@ def load_environment(
     if log_level is not None:
         configure_logging(log_level)
 
-    nurec_cfg = _resolve_nurec_config(
-        enable_nurec=enable_nurec,
-        nurec_scene_path=nurec_scene_path,
-        nurec_camera_logical_id=nurec_camera_logical_id,
-        nurec_mode=nurec_mode,
-        nurec_resolution_ratio=nurec_resolution_ratio,
-        nurec_framerate=nurec_framerate,
-        nurec=nurec,
-    )
-    cosmos_cfg = _resolve_cosmos_config(
-        enable_cosmos=enable_cosmos,
-        cosmos_server_url=cosmos_server_url,
-        cosmos_prompt=cosmos_prompt,
-        cosmos=cosmos,
-    )
-    _validate_renderer_config(nurec_cfg, cosmos_cfg)
-    effective_version = _resolve_effective_carla_version(
-        carla_version,
-        nurec_cfg=nurec_cfg,
-    )
-
     scenario_obj = _make_scenario(scenario)
 
-    if enable_vision is not None:
-        if not bool(enable_vision) and getattr(scenario_obj.config, "vision_only", False):
-            raise ValueError(
-                f"Scenario {scenario_obj.config.name!r} is vision-only and cannot run with enable_vision=False"
-            )
-        scenario_obj.config.enable_vision = bool(enable_vision)
-    if nurec_cfg.enabled or cosmos_cfg.enabled:
-        scenario_obj.config.enable_vision = True
+    mode = str(observation_mode).strip().lower()
+    if mode not in {"text", "vision"}:
+        raise ValueError("observation_mode must be 'text' or 'vision'")
+    scenario_obj.config.enable_vision = mode == "vision"
+    scenario_obj.config.vision_only = mode == "vision"
+    scenario_obj.config.auto_observe = mode == "text"
+
     if record_video is not None:
         scenario_obj.config.record_video = bool(record_video)
     if video_output_dir is not None:
         scenario_obj.config.video_output_dir = str(video_output_dir)
-    if nurec_cfg.enabled:
-        scenario_obj.config.enable_nurec = True
-        scenario_obj.config.enable_vision = True
-        scenario_obj.config.nurec_mode = str(nurec_cfg.mode)
-        scenario_obj.config.nurec_scene_path = str(nurec_cfg.scene_path)
-        scenario_obj.config.nurec_camera_logical_id = str(nurec_cfg.camera_logical_id)
-        scenario_obj.config.nurec_resolution_ratio = float(nurec_cfg.resolution_ratio)
-        scenario_obj.config.nurec_framerate = float(nurec_cfg.framerate)
-    if cosmos_cfg.enabled:
-        scenario_obj.config.enable_cosmos = True
-        scenario_obj.config.enable_vision = True
-        scenario_obj.config.cosmos_server_url = str(cosmos_cfg.server_url)
-        scenario_obj.config.cosmos_prompt = str(cosmos_cfg.prompt)
-
-    _validate_scenario_renderer_compatibility(scenario_obj)
-
-    sandbox_obj = CarlaSandboxConfig.from_obj(sandbox, carla_version=effective_version)
-    explicit_start_cmd = False
-    if isinstance(sandbox, dict):
-        explicit_start_cmd = sandbox.get("carla_start_command") is not None
-    elif isinstance(sandbox, CarlaSandboxConfig):
-        explicit_start_cmd = bool(getattr(sandbox, "_carla_start_command_explicit", False))
-
-    wants_vision = _scenario_needs_rendering(scenario_obj.config)
-    if not explicit_start_cmd:
-        sandbox_obj.carla_start_command = _default_sandbox_start_command(
-            sandbox_obj.carla_version, wants_vision
-        )
-        sandbox_obj._carla_start_command_explicit = False
-
-    if not nurec_cfg.enabled:
-        _validate_map_for_version(
-            getattr(scenario_obj.config, "map_name", None),
-            parse_version(sandbox_obj.carla_version),
-            source=f"Scenario {scenario_obj.config.name!r}",
-        )
-
-    auto_enable_tm_exposure = False
-    if traffic_manager_enabled is None and isinstance(scenario_obj, NavigationScenario):
-        from .scenarios import FreeRoamScenario
-
-        needs_tm = (
-            isinstance(scenario_obj, FreeRoamScenario)
-            and int(getattr(scenario_obj.config, "num_npc_vehicles", 0)) > 0
-        )
-        traffic_manager_enabled = bool(needs_tm)
-        auto_enable_tm_exposure = bool(needs_tm)
-
-    if auto_enable_tm_exposure and str(getattr(sandbox_obj, "mode", "")).lower() != "disabled":
-        sandbox_obj.expose_traffic_manager = True
 
     cfg = CarlaEnvConfig(
         host=host,
@@ -2256,12 +1269,8 @@ def load_environment(
         timeout_s=float(timeout_s),
         max_retries=int(max_retries),
         trolley_micro_scoring=str(trolley_micro_scoring or "expected"),
-        sandbox=sandbox_obj,
-        traffic_manager_enabled=traffic_manager_enabled,
+        traffic_manager_enabled=bool(traffic_manager_enabled),
         tm_port=tm_port,
-        carla_version=effective_version,
-        nurec=nurec_cfg,
-        cosmos=cosmos_cfg,
     )
 
     return CarlaEnv(config=cfg, scenario=scenario_obj)

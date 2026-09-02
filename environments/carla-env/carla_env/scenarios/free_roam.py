@@ -176,20 +176,14 @@ class FreeRoamScenario(NavigationScenario):
 
     def build_system_prompt(self, state: Any) -> str:
         camera_available = bool(state.get("_camera_available", self.config.enable_vision))
-        depth_available = bool(state.get("_depth_available", False))
-        replay_note = self.replay_readonly_note()
         vision_note = ""
         if self.config.enable_vision and not camera_available:
-            if depth_available:
-                vision_note = "Front RGB camera unavailable in this episode; depth capture is still available.\n\n"
-            else:
-                vision_note = (
-                    "Front camera unavailable in this episode; rely on text observations only.\n\n"
-                )
+            vision_note = (
+                "Front camera unavailable in this episode; rely on text observations only.\n\n"
+            )
         return (
             "Explore the free-roam driving environment safely.\n\n"
             "There is no fixed destination. Explore the environment, drive safely, "
             "and avoid collisions with other vehicles and pedestrians.\n\n"
-            f"{replay_note}"
             f"{vision_note}"
         )

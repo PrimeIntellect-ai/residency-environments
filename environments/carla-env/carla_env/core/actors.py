@@ -125,7 +125,7 @@ class ActorManager:
         if not to_destroy:
             return
 
-        # Sandbox mode often has higher latency; batch-destroy reduces RPC round trips.
+        # Remote runtimes often have higher latency; batch-destroy reduces RPC round trips.
         try:
             for a in to_destroy:
                 try:

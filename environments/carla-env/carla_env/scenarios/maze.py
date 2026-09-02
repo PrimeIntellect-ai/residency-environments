@@ -37,14 +37,13 @@ class MazeScenario(BaseScenario[MazeConfig]):
 
     def build_system_prompt(self, state: Any) -> str:
         cfg = self.config
-        replay_note = self.replay_readonly_note()
         goal_info_available = bool(state.get("_goal_info_available", self.goal_info_enabled()))
         objective_block = (
             f"Goal: reach the hidden target location (within {cfg.success_radius_m:.0f}m).\n"
             if goal_info_available
-            else "This replay does not use an active hidden goal.\n"
+            else "This task does not use an active hidden goal.\n"
         )
-        return f"Complete the navigation task.\n\n{objective_block}{replay_note}"
+        return f"Complete the navigation task.\n\n{objective_block}"
 
     def reset(self, state: Any) -> None:
         cfg = self.config
