@@ -1,0 +1,11 @@
+{
+ "task_id": "v2-pl-72-norm_backward",
+ "student_file": "solution.cu",
+ "gate_type": "perf",
+ "test_target": "test_student",
+ "bench_target": "bench_student",
+ "supported": true,
+ "naive_ref_ratio": 108.1,
+ "runtime_kind": "cuda",
+ "gate_note": "perf: reference is efficient (2.9ms); CPU host-replay 108x slower"
+}
