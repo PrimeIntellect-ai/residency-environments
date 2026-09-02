@@ -45,6 +45,7 @@ class WorldConfig:
     fixed_delta_seconds: float = 0.05
     weather: str = "ClearNoon"
     traffic_manager_enabled: bool = True
+    seed: int | None = None
 
 
 class WorldManager:
@@ -97,6 +98,8 @@ class WorldManager:
             else:
                 raise RuntimeError(f"Failed to load map {map_name!r}: {last_err}") from last_err
 
+        if self.config.seed is not None:
+            self.world.set_pedestrians_seed(int(self.config.seed))
         self._apply_world_settings()
         self._configure_traffic_manager()
         self._set_weather(self.config.weather)
@@ -137,6 +140,8 @@ class WorldManager:
             # TrafficManager sync is required when using agents in sync mode.
             try:
                 self._tm = self.client.get_traffic_manager()
+                if self.config.seed is not None:
+                    self._tm.set_random_device_seed(int(self.config.seed))
                 self._tm.set_synchronous_mode(True)
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to initialize TrafficManager: %s", e)

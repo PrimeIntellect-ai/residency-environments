@@ -31,8 +31,9 @@ class ActorManager:
     Tracks actors spawned by this environment and cleans them up reliably.
     """
 
-    def __init__(self, world: WorldManager):
+    def __init__(self, world: WorldManager, rng: random.Random | None = None):
         self.world_manager = world
+        self._rng = rng or random.Random()
         self._actors: list[carla.Actor] = []
         self._sensors: list[carla.Actor] = []
 
@@ -227,7 +228,7 @@ class ActorManager:
         bps = list(self.blueprints.filter(blueprint_filter))
         if not bps:
             return None
-        bp = random.choice(bps)
+        bp = self._rng.choice(bps)
         actor = self.world.try_spawn_actor(bp, transform)
         if actor is None:
             return None

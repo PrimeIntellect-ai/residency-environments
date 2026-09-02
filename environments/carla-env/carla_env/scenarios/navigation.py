@@ -96,6 +96,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         return reqs
 
     def reset(self, state: Any) -> None:
+        self._rng.seed(self.config.seed)
         state.setdefault("scenario_state", {})
         state["scenario_state"]["navigation"] = {
             "prev_goal_distance": None,
@@ -104,7 +105,6 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
             "collision_count": 0,
             "cumulative_reward": 0.0,
         }
-        self._rng.seed(self.config.seed)
         if self._configured_weather == "random":
             self.config.weather = self._rng.choice(WEATHER_PRESETS)
 
@@ -267,10 +267,16 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
 
         runtime = state.get("carla")
         collision = bool(runtime is not None and runtime.collision_sensor.collision_count > 0)
-        progress = (previous_distance - goal_distance) / max(initial_distance, 1.0)
+        advanced_time = bool(state.get("_turn_advanced_time", False))
+        progress = (
+            (previous_distance - goal_distance) / max(initial_distance, 1.0)
+            if advanced_time
+            else 0.0
+        )
         goal_reached = goal_distance < float(self.config.success_radius)
+        time_penalty = -0.01 if advanced_time else 0.0
         step_reward = (
-            progress + (10.0 if goal_reached else 0.0) + (-5.0 if collision else 0.0) - 0.01
+            progress + (10.0 if goal_reached else 0.0) + (-5.0 if collision else 0.0) + time_penalty
         )
         cumulative_reward = float(navigation_state.get("cumulative_reward") or 0.0) + step_reward
 
@@ -332,6 +338,12 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         return f"Complete the open navigation task.\n\n{objective_block}{camera_note}"
 
     def ticks_after_tool(self, tool_name: str, tool_args: dict, state: Any) -> int:
-        if tool_name in {"capture_image", "get_goal_info", "follow_route"}:
+        if tool_name in {
+            "capture_image",
+            "get_goal_info",
+            "init_navigation_agent",
+            "set_destination",
+            "follow_route",
+        }:
             return 0
         return 0 if state.get("_tool_did_tick") else 1

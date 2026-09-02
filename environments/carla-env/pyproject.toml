@@ -36,7 +36,7 @@ include = [
 ]
 
 [tool.verifiers.eval]
-num_examples = 13
+num_examples = 19
 rollouts_per_example = 2
 
 [tool.ruff]

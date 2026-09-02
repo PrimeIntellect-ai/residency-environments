@@ -1,4 +1,4 @@
-num_tasks = 13
+num_tasks = 19
 num_rollouts = 2
 max_concurrent = 1
 push = false
@@ -6,6 +6,8 @@ push = false
 [env.taskset]
 id = "carla-env"
 modality = "vision"
+families = ["decision", "maze", "navigation", "free_roam"]
+seeds = [0, 1]
 
 [env.taskset.task.tools]
 colocated = false

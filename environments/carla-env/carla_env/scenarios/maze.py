@@ -180,7 +180,13 @@ class MazeScenario(BaseScenario[MazeConfig]):
         return outcome
 
     def ticks_after_tool(self, tool_name: str, tool_args: dict, state: Any) -> int:
-        # Minimal advancement per tool; follow_route ticks internally.
-        if tool_name == "follow_route":
+        # Setup/inspection tools are passive; follow_route ticks internally.
+        if tool_name in {
+            "capture_image",
+            "get_goal_info",
+            "init_navigation_agent",
+            "set_destination",
+            "follow_route",
+        }:
             return 0
         return 0 if state.get("_tool_did_tick") else 1

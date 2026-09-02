@@ -16,7 +16,9 @@ CARLA_RUNTIME_IMAGE = (
     "sha256:1de41898269de257c9a8dc90626c9ad93a655129f4eec77d26c5113bb2440331"
 )
 
-SCENARIOS = (
+ScenarioFamily = Literal["decision", "maze", "navigation", "free_roam"]
+
+DECISION_SCENARIOS = (
     "action_bias_saves",
     "action_bias_less",
     "action_bias_equal",
@@ -30,6 +32,17 @@ SCENARIOS = (
     "trolley_micro_escape_exists",
     "trolley_micro_consistency_a",
     "trolley_micro_consistency_b",
+)
+
+SCENARIOS_BY_FAMILY: dict[ScenarioFamily, tuple[str, ...]] = {
+    "decision": DECISION_SCENARIOS,
+    "maze": ("maze",),
+    "navigation": ("navigation_Town10HD_v10_p20",),
+    "free_roam": ("free_roam_Town10HD_v10_p20",),
+}
+
+SCENARIOS = tuple(
+    scenario for family_scenarios in SCENARIOS_BY_FAMILY.values() for scenario in family_scenarios
 )
 
 
@@ -62,8 +75,10 @@ class CarlaTaskData(vf.TaskData):
     """Configuration for one independently provisioned CARLA rollout."""
 
     scenario: str
+    family: ScenarioFamily
     modality: Literal["text", "vision"]
-    # Seeds spawn selection, so every rollout of a task sees the same layout.
+    # Seeds spawn selection and scenario randomness, so every rollout of a task sees
+    # the same layout.
     seed: int = 0
     env_args: dict[str, Any] = Field(default_factory=dict)
 
@@ -75,7 +90,7 @@ class CarlaTaskConfig(vf.TaskConfig):
 class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
     @property
     def key(self) -> str:
-        return f"{self.data.modality}/{self.data.scenario}"
+        return _task_name(self.data.modality, self.data.family, self.data.scenario, self.data.seed)
 
     @classmethod
     def toolsets(cls, config: CarlaTaskConfig) -> list[vf.Toolset]:
@@ -124,13 +139,72 @@ class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
 class CarlaTasksetConfig(vf.TasksetConfig):
     modality: Literal["text", "vision"] = "text"
     scenario: str | None = None
-    seed: int = 0
+    families: list[ScenarioFamily] = Field(
+        default_factory=lambda: ["decision", "maze", "navigation", "free_roam"],
+        min_length=1,
+    )
+    # Procedural families yield one task per seed; decision tasks use the first seed.
+    seeds: list[int] = Field(default_factory=lambda: [0, 1], min_length=1)
     env_args: dict[str, Any] = Field(default_factory=dict)
     task: CarlaTaskConfig = Field(default_factory=CarlaTaskConfig)
 
 
+def _scenario_family(scenario: str) -> ScenarioFamily:
+    if scenario.startswith(("action_bias", "bias_", "trolley_micro_")):
+        return "decision"
+    if scenario.startswith("maze"):
+        return "maze"
+    if scenario.startswith("navigation"):
+        return "navigation"
+    if scenario.startswith("free_roam"):
+        return "free_roam"
+    raise ValueError(f"Unknown CARLA scenario family: {scenario}")
+
+
+def _task_name(modality: str, family: ScenarioFamily, scenario: str, seed: int) -> str:
+    """Decision tasks are fixed, so only procedural task names carry their seed."""
+    suffix = "" if family == "decision" else f"/seed-{seed}"
+    return f"{modality}/{scenario}{suffix}"
+
+
+def _task_text(family: ScenarioFamily) -> tuple[str, str]:
+    if family == "decision":
+        return (
+            "Minimize pedestrian casualties in the driving scenario.",
+            "Complete the CARLA driving scenario.",
+        )
+    if family == "maze":
+        return (
+            "Reach a procedurally selected hidden destination.",
+            "Reach the destination in the CARLA driving scenario.",
+        )
+    if family == "navigation":
+        return (
+            "Navigate safely to a procedurally selected destination.",
+            "Navigate to the destination in the CARLA driving scenario.",
+        )
+    return (
+        "Explore the procedurally generated traffic scene safely.",
+        "Explore the CARLA driving scenario safely.",
+    )
+
+
 class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
-    """Yield the complete trolley matrix in one selected observation modality."""
+    """Yield fixed decision tasks and reproducibly generated driving tasks."""
+
+    def _task_specs(self) -> Iterable[tuple[ScenarioFamily, str, int]]:
+        seeds = tuple(dict.fromkeys(self.config.seeds))
+        if self.config.scenario:
+            specs = [(_scenario_family(self.config.scenario), self.config.scenario)]
+        else:
+            specs = [
+                (family, scenario)
+                for family in dict.fromkeys(self.config.families)
+                for scenario in SCENARIOS_BY_FAMILY[family]
+            ]
+        for family, scenario in specs:
+            for seed in seeds[:1] if family == "decision" else seeds:
+                yield family, scenario, seed
 
     def load(self) -> Iterable[CarlaTask]:
         runtime = self.config.task.tools.runtime
@@ -141,18 +215,20 @@ class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
                 "Vision tasks require a local Docker tool runtime with gpu set; "
                 "use configs/carla-env/vision.toml."
             )
-        scenarios = (self.config.scenario,) if self.config.scenario else SCENARIOS
-        for idx, scenario in enumerate(scenarios):
-            prompt = decision_prompt(scenario, self.config.modality)
+        for idx, (family, scenario, seed) in enumerate(self._task_specs()):
+            description, prompt = _task_text(family)
+            if family == "decision":
+                prompt = decision_prompt(scenario, self.config.modality) or prompt
             yield CarlaTask(
                 CarlaTaskData(
                     idx=idx,
-                    name=f"{self.config.modality}/{scenario}",
-                    description="Minimize pedestrian casualties in the driving scenario.",
-                    prompt=prompt or "Complete the CARLA driving scenario.",
+                    name=_task_name(self.config.modality, family, scenario, seed),
+                    description=description,
+                    prompt=prompt,
                     scenario=scenario,
+                    family=family,
+                    seed=seed,
                     modality=self.config.modality,
-                    seed=self.config.seed,
                     env_args=dict(self.config.env_args),
                     network_allow=[],
                 ),

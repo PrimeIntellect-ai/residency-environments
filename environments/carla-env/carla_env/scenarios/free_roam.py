@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Dict
+
+import carla
 
 from .navigation import NavigationConfig, NavigationScenario
 
@@ -14,6 +17,7 @@ class FreeRoamConfig(NavigationConfig):
     vision_only: bool = False
     random_goal: bool = False
     max_steps: int = 500
+    coverage_cell_m: float = 20.0
 
 
 class FreeRoamScenario(NavigationScenario):
@@ -57,6 +61,10 @@ class FreeRoamScenario(NavigationScenario):
     def supports_goal_info(self) -> bool:
         return False
 
+    def _coverage_cell(self, location: Any) -> str:
+        size = max(1.0, float(self.config.coverage_cell_m))
+        return f"{math.floor(float(location.x) / size)}:{math.floor(float(location.y) / size)}"
+
     def setup(self, state: Any) -> None:
         runtime = state["carla"]
         state.setdefault("scenario_data", {})
@@ -71,6 +79,18 @@ class FreeRoamScenario(NavigationScenario):
 
         # Spawn NPC traffic but skip goal selection.
         ego_location = runtime.ego_vehicle.get_transform().location
+        nav_state = state["scenario_state"]["navigation"]
+        nav_state.update(
+            {
+                "previous_location": {
+                    "x": float(ego_location.x),
+                    "y": float(ego_location.y),
+                    "z": float(ego_location.z),
+                },
+                "distance_traveled_m": 0.0,
+                "visited_cells": [self._coverage_cell(ego_location)],
+            }
+        )
         carla_map = runtime.world.map
         spawn_points = list(carla_map.get_spawn_points())
         available_spawns = [sp for sp in spawn_points if sp.location.distance(ego_location) > 10.0]
@@ -106,8 +126,6 @@ class FreeRoamScenario(NavigationScenario):
                 loc.z += 0.5
                 if any(loc.distance(other) < 5.0 for other in occupied_locations):
                     continue
-                import carla
-
                 actor = runtime.actors.spawn_pedestrian(carla.Transform(loc))
                 if actor is not None:
                     spawned_pedestrians += 1
@@ -152,11 +170,38 @@ class FreeRoamScenario(NavigationScenario):
         new_collisions = max(0, current_collisions - prev_collisions)
         nav_state["collision_count"] = current_collisions
 
-        # Reward: survival bonus only when the sim actually advanced this turn;
-        # zero-tick tools (capture_image, etc.) should not farm reward.
-        # Collision penalty applies once per new collision event, not every turn.
         ticked = bool(state.get("_turn_advanced_time", False))
-        step_reward = (0.01 if ticked else 0.0) + (-5.0 * new_collisions)
+        current_location = runtime.ego_vehicle.get_location() if runtime is not None else None
+        previous_location = nav_state.get("previous_location")
+        distance_delta = 0.0
+        if current_location is not None and isinstance(previous_location, dict):
+            previous = carla.Location(
+                x=float(previous_location["x"]),
+                y=float(previous_location["y"]),
+                z=float(previous_location["z"]),
+            )
+            distance_delta = float(current_location.distance(previous))
+        if current_location is not None:
+            nav_state["previous_location"] = {
+                "x": float(current_location.x),
+                "y": float(current_location.y),
+                "z": float(current_location.z),
+            }
+
+        distance_traveled = float(nav_state.get("distance_traveled_m", 0.0)) + distance_delta
+        nav_state["distance_traveled_m"] = distance_traveled
+        visited_cells = set(str(cell) for cell in nav_state.get("visited_cells", []))
+        new_cell = False
+        if current_location is not None:
+            cell = self._coverage_cell(current_location)
+            new_cell = cell not in visited_cells
+            visited_cells.add(cell)
+        nav_state["visited_cells"] = sorted(visited_cells)
+
+        movement_reward = min(distance_delta, 20.0) * 0.01 if ticked else 0.0
+        coverage_reward = 0.25 if ticked and new_cell else 0.0
+        idle_penalty = -0.02 if ticked and distance_delta < 0.25 else 0.0
+        step_reward = movement_reward + coverage_reward + idle_penalty - (5.0 * new_collisions)
         cumulative_reward = prev_reward + step_reward
         nav_state["cumulative_reward"] = cumulative_reward
 
@@ -165,6 +210,9 @@ class FreeRoamScenario(NavigationScenario):
             "goal_reached": False,
             "collision": current_collisions > 0,
             "steps": steps,
+            "distance_traveled_m": distance_traveled,
+            "coverage_cells": len(visited_cells),
+            "stalled": bool(ticked and distance_delta < 0.25),
             "reward": float(cumulative_reward),
             "step_reward": float(step_reward),
         }

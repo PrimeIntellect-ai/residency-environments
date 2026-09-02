@@ -512,12 +512,13 @@ class CarlaEnv:
                 fixed_delta_seconds=self.config.fixed_delta_seconds,
                 weather=getattr(scenario.config, "weather", self.config.weather),
                 traffic_manager_enabled=bool(self.config.traffic_manager_enabled),
+                seed=self.config.seed,
             ),
         )
         actors: ActorManager | None = None
         try:
             world_mgr.configure(map_name=map_name)
-            actors = ActorManager(world_mgr)
+            actors = ActorManager(world_mgr, rng=self._rng)
             actors.cleanup_world()
             for _ in range(3):
                 world_mgr.tick()
@@ -1182,14 +1183,17 @@ def load_environment(
             scenario's own mode (``navigation_vision*`` is vision, everything else text).
         record_video: Record episode video without changing tool observability.
         video_output_dir: Output directory for episode recordings.
-        seed: Seeds spawn selection and scenario randomness so repeated sessions get
-            the same layout.
+        seed: Seeds spawn selection, scenario randomness, and CARLA pedestrian and
+            traffic manager randomness, so repeated sessions get the same layout.
     """
     if kwargs:
         names = ", ".join(sorted(kwargs))
         raise TypeError(f"Unsupported CARLA environment arguments: {names}")
     if log_level is not None:
         configure_logging(log_level)
+    if seed is not None:
+        # The vendored CARLA LocalPlanner also draws from Python's module-level RNG.
+        random.seed(seed)
 
     scenario_obj = _make_scenario(scenario)
     scenario_obj.config.seed = seed
