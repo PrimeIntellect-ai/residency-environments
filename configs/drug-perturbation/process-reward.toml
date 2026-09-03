@@ -1,0 +1,13 @@
+# Overlay on eval.toml. Override the judge model explicitly for a new experiment.
+[env.taskset.task.rewards]
+deterministic_reward = { weight = 0.0 }
+process_adjusted_reward = { weight = 1.0 }
+
+[env.taskset.task.process_judge]
+model = "google/gemini-3-flash-preview"
+max_retries = 2
+timeout_seconds = 180
+
+[env.taskset.task.process_judge.sampling]
+temperature = 0
+max_tokens = 900
