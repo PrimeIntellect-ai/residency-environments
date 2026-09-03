@@ -190,6 +190,12 @@ and bounds the optional neighbor count. Consequently, scoring parity does not
 claim byte-identical complete prompts, identical tool schemas, Hosted Lab
 compatibility, or equivalent stochastic RL trajectories.
 
+A one-prompt/two-response live Docker smoke test with the Qwen3.5-35B base
+model and Gemini process judge completed successfully; see the
+[validation note](../../scripts/drug-perturbation/VALIDATION.md) for the exact
+configuration, reward checks, and limitations. This is an integration check,
+not an estimate of model or judge performance.
+
 The code is Apache-2.0. Source data retain their own terms and attribution:
 see [DATA_SOURCES.md](DATA_SOURCES.md). This is a research benchmark, not
 clinical treatment guidance.
