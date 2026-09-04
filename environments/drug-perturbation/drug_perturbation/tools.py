@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import hashlib
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -16,11 +17,23 @@ from rdkit.Chem.Scaffolds import MurckoScaffold
 RDLogger.DisableLog("rdApp.*")
 
 DATA_DIR = Path(__file__).parent / "data"
+COMPOUND_COLUMNS = ["smiles", "inchi_key", "pert_iname"]
+COMPOUND_SHA256 = "ca7e13401454c71848a62aa64dce8a3cfb86a311fce6e4552a7fac4f3d0d3160"
 
 
 @functools.lru_cache(maxsize=1)
 def _load_compound_db() -> tuple[pd.DataFrame, list]:
-    frame = pd.read_parquet(DATA_DIR / "compound_table.parquet")
+    path = DATA_DIR / "compound_table.parquet"
+    with path.open("rb") as handle:
+        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+    if digest != COMPOUND_SHA256:
+        raise ValueError(f"Compound lookup checksum mismatch: expected {COMPOUND_SHA256}, got {digest}")
+    frame = pd.read_parquet(path)
+    if list(frame.columns) != COMPOUND_COLUMNS:
+        raise ValueError(
+            "The compound lookup must contain only solver-safe chemistry fields; "
+            f"expected {COMPOUND_COLUMNS}, got {list(frame.columns)}"
+        )
 
     fingerprints: list = []
     for smiles in frame["smiles"]:

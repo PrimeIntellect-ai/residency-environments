@@ -1,8 +1,11 @@
 # Live integration smoke test
 
-Validated on 2026-09-03 with Verifiers 0.3.1, Docker 28.3.3, and environment
-implementation commit `436a84b`. This is a functionality check on one prompt
-with two responses, not a performance estimate or judge-quality evaluation.
+Validated on 2026-09-03 with Verifiers 0.3.1 and Docker 28.3.3. This is a
+functionality check on one prompt with two responses, not a performance
+estimate or judge-quality evaluation. A subsequent review change removed
+unused biological gold columns from the compound table without changing any
+tool-consumed field or output; regeneration, tool-parity, and package checks
+were rerun after that change.
 
 ## Configuration
 

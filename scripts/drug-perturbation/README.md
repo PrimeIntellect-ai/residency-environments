@@ -12,15 +12,20 @@ To reproduce the train/test export from the original public
 uv pip install -e ./environments/drug-perturbation
 uv run scripts/drug-perturbation/prepare_dataset.py \
   --source /path/to/smallmol_chain_examples.parquet \
+  --compound-source /path/to/compound_table.parquet \
   --output /path/to/new-export-directory
 ```
 
 The helper validates the source checksum, schema, row counts, references,
 and compound-disjoint splits. It preserves row order and duplicate
 multiplicity, checks the Parquet round trip, and writes a manifest and data
-card. It refuses to overwrite an existing directory and does not publish
-anything. Parquet byte checksums can depend on the writer version; the
-published artifact and loader hashes are the frozen benchmark authority.
+card. It also creates a solver-safe `compound_table.parquet` containing only
+`smiles`, `inchi_key`, and `pert_iname`; the source table's benchmark target,
+mechanism, and unused identifier fields are excluded. The tool loader enforces
+that exact safe schema. It refuses to overwrite an existing directory and
+does not publish anything. Parquet byte checksums can depend on the writer
+version; the pinned dataset hashes and packaged lookup hash are the frozen
+benchmark authority.
 
 The source construction pipeline and data citations remain in the upstream
 public repository and the environment's `DATA_SOURCES.md`. No private reports,

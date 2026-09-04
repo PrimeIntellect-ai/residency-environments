@@ -53,12 +53,18 @@ source's listed collection-specific terms.
 | File | Contents |
 | --- | --- |
 | Hugging Face `data/train.parquet` and `data/test.parquet` | prompts, answers, splits, and assay provenance; evaluator-only |
-| `compound_table.parquet` | compound identity and chemistry lookup table |
+| `compound_table.parquet` | solver-safe compound identity table: only SMILES, InChIKey, and name; no target, mechanism, or benchmark labels |
 | `hallmark_names.json` | Hallmark ontology names used for scoring; no gene memberships |
 
 The repository does not include raw source downloads. The original
 [public construction pipeline](https://github.com/swpo/drug-perturbation-rl/tree/main/scripts)
 produced the derived example table. `scripts/drug-perturbation/prepare_dataset.py`
 in residency-environments repackages that frozen public table without changing
-its rows. The original table SHA-256 is
+its rows and strips biological answer fields from the solver-facing compound
+lookup. The original example table SHA-256 is
 `9f1cedc98d93f84069d4ed823325adb6e03fca26c611ca42e11628d057b9c048`.
+The full compound-source table SHA-256 is
+`f462b5d581caaac83812fee88c9033e238e01f40a881554df8ea89a35a29de12`;
+that full source is not included in the package.
+The solver-safe packaged table SHA-256 is
+`ca7e13401454c71848a62aa64dce8a3cfb86a311fce6e4552a7fac4f3d0d3160`.

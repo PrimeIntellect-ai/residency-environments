@@ -159,7 +159,9 @@ The judge runs in the evaluator, outside the solver's network restrictions.
 The optional `identify_compound(smiles, top_k=5)` tool returns a name match,
 molecular descriptors, scaffold, and chemically similar compound names.
 It returns no targets, mechanisms, pathways, expression values, or phenotype
-labels. It is enabled by default to match the tool-assisted task; set
+labels. Its packaged lookup table physically contains only SMILES, InChIKey,
+and compound name, and the loader rejects any broader schema. It is enabled by
+default to match the tool-assisted task; set
 `env.taskset.task.tools_enabled=false` for the no-tool condition. `top_k` is
 bounded to 1–20. The narrowly scoped tool provides identity/chemistry without
 opening access to biological answer databases. No Hallmark or gene-expression
