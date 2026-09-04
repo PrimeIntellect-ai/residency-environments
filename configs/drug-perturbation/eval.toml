@@ -1,0 +1,25 @@
+# Supply the policy with -m. Start with -n 1 -r 2 before a full evaluation.
+num_tasks = 100
+num_rollouts = 8
+max_concurrent = 32
+push = false
+
+[env.taskset]
+id = "drug-perturbation"
+split = "test"
+entry_points = ["smiles_only"]
+phenotypes = ["viability", "cell_cycle", "stress"]
+seed = 42
+
+[env.agent]
+max_turns = 5
+
+[env.agent.harness]
+id = "null"
+
+[env.agent.runtime]
+type = "docker"
+image = "python:3.11-slim"
+
+[sampling]
+max_tokens = 16384
