@@ -15,7 +15,7 @@ import statistics
 import subprocess
 import uuid
 
-from pmpp_hard import kernelguard_gate, markers, residency
+from pmpp_hard import grader_inputs, kernelguard_gate, markers, residency
 from pmpp_hard.config import DEFAULT_SCORE_IMAGES, PMPPHardConfig, PMPPHardTaskData
 from pmpp_hard.errors import ScoreInfraError
 from pmpp_hard.paths import DataTree, Workspace
@@ -341,18 +341,11 @@ async def ensure_python_env(runtime, where: str) -> None:
     res = await runtime.run(["bash", "-lc", probe], {})
     if res.exit_code == 0:
         return
-    # Bound package installation so a stalled network request releases the GPU lock.
-    await runtime.run(
-        ["bash", "-lc", "timeout 900 pip install -q torch triton 2>/dev/null || true"],
-        {},
+    tail = (res.stdout + res.stderr).strip()[-300:]
+    raise ScoreInfraError(
+        f"{where}: image cannot import torch/triton; "
+        f"rebuild the Triton image with scripts/pmpp-hard/build-images.sh: {tail}"
     )
-    res = await runtime.run(["bash", "-lc", probe], {})
-    if res.exit_code != 0:
-        tail = (res.stdout + res.stderr).strip()[-300:]
-        raise ScoreInfraError(
-            f"{where}: python env bootstrap failed — torch/triton not importable "
-            f"(image lacks python3 or packages): {tail}"
-        )
 
 
 async def run_grader(
@@ -579,10 +572,25 @@ async def grade_in_fresh_runtime(
             f"{type(last_exc).__name__}: {str(last_exc)[:160]}"
         ) from last_exc
     try:
+        correctness_parameter = grader_inputs.draw_parameter(task.task_id)
+        _pmpp_info(trace)["correctness_inputs"] = {
+            "policy": grader_inputs.POLICY,
+            "mode": "randomized" if correctness_parameter is not None else "fixed",
+            "parameter": (
+                f"{correctness_parameter:016x}"
+                if correctness_parameter is not None
+                else None
+            ),
+        }
         await score_rt.write(f"/app/{task.student_file}", kernel)
         ws = Workspace(score_rt)
         await provision_grader(
-            config, task, ws, tree.bundle(task.task_id), tree
+            config,
+            task,
+            ws,
+            tree.bundle(task.task_id),
+            tree,
+            correctness_parameter=correctness_parameter,
         )  # Provision the configured grader.
         if task.student_file.endswith(".py"):
             await ensure_python_env(

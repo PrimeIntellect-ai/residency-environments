@@ -9,8 +9,9 @@ import dataclasses
 import pathlib
 from typing import Literal
 
-from pmpp_hard import markers
+from pmpp_hard import grader_inputs, markers
 from pmpp_hard.config import PMPPHardConfig, PMPPHardTaskData
+from pmpp_hard.errors import ScoreInfraError
 from pmpp_hard.paths import DataTree, Workspace
 
 SetupMode = Literal["grader_sanity", "grader_real", "opaque", "single_shot"]
@@ -68,6 +69,8 @@ async def provision_grader(
     src: pathlib.Path,
     tree: DataTree,
     with_ref_binary: bool = False,
+    *,
+    correctness_parameter: int | None = None,
 ) -> str | None:
     """Populate a grader from sanity or authoritative bundle files.
 
@@ -77,11 +80,20 @@ async def provision_grader(
     build failure returns a host-side reason that is not written into the workspace.
     """
     bundle = tree.bundle(task.task_id)
+    if correctness_parameter is not None:
+        if src != bundle:
+            raise ValueError(
+                "randomized correctness inputs belong only in the scoring grader"
+            )
+        grader_inputs.validate_filename(task.task_id, [f.name for f in src.iterdir()])
     await ws.write(".grader/Makefile", (bundle / "Makefile").read_bytes())
     for f in src.iterdir():
         if not provisionable(f):
             continue
-        await ws.write(f".grader/{f.name}", f.read_bytes())
+        content = f.read_bytes()
+        if correctness_parameter is not None and f.name.startswith("test_"):
+            content = grader_inputs.render(task.task_id, content, correctness_parameter)
+        await ws.write(f".grader/{f.name}", content)
     perf = "1" if perf_enabled(config, task) else "0"
     await ws.write("verify_student", render_verify_script(task).encode())
     await ws.run(["chmod", "+x", "/app/verify_student"])
@@ -151,14 +163,9 @@ async def setup_workspace(
     else:
         await provision_grader(config, task, ws, bundle, tree)
     # Python dependencies are needed only when the agent receives a runnable grader.
-    # Other modes record that bootstrap was skipped without probing the sandbox.
+    # Other modes do not need to probe the sandbox.
     if task.student_file.endswith(".py"):
         if outcome.mode in ("grader_sanity", "grader_real"):
-            # Verify imports after installation so dependency failures are classified as
-            # infrastructure errors rather than solution failures.
-            await ws.run(
-                ["bash", "-lc", "pip install -q torch triton 2>/dev/null || true"]
-            )
             probe = await ws.run(
                 ["bash", "-lc", "python3 -c 'import torch, triton' 2>&1"]
             )
@@ -166,16 +173,16 @@ async def setup_workspace(
                 tail = (
                     getattr(probe, "stdout", "") + getattr(probe, "stderr", "")
                 ).strip()[-300:]
-                raise RuntimeError(
-                    f"agent sandbox python env bootstrap failed for {task.task_id} — "
-                    f"torch/triton not importable (env fault): {tail}"
+                raise ScoreInfraError(
+                    f"agent sandbox image cannot import torch/triton for {task.task_id}; "
+                    f"rebuild the Triton image with scripts/pmpp-hard/build-images.sh: {tail}"
                 )
         else:
             outcome = dataclasses.replace(
                 outcome,
                 degraded_reason=(
                     outcome.degraded_reason
-                    or "agent-side python env not bootstrapped "
+                    or "agent-side Python dependency probe skipped "
                     f"({outcome.mode}: no agent grader needs torch/triton)"
                 ),
             )

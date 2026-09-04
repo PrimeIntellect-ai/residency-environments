@@ -5,6 +5,8 @@ from typing import Literal
 
 import verifiers.v1 as vf
 
+from pmpp_hard.grader_inputs import POLICY, RANDOMIZED_TASKS
+
 GATE_PERF = {"perf", "insight"}  # gate types that require performance scoring
 RELEASE_MANIFEST = "pool_pipeline_pmpp_hard69.jsonl"
 RELEASE_SANITY_MANIFEST = "sanity_manifest_pmpp_hard69.json"
@@ -135,6 +137,8 @@ class LeverVector:
     triton_premise: bool = True
     # Supplementary policy checks are part of the scoring contract.
     kernelguard_check: bool = True
+    correctness_inputs: str = POLICY
+    n_randomized_correctness: int = 0
 
     @classmethod
     def compute(
@@ -169,6 +173,7 @@ class LeverVector:
             source_policy=config.source_policy,
             triton_premise=config.triton_premise,
             kernelguard_check=config.kernelguard_check,
+            n_randomized_correctness=sum(t.task_id in RANDOMIZED_TASKS for t in tasks),
         )
 
     def header_lines(self) -> list[str]:
@@ -183,6 +188,8 @@ class LeverVector:
             f"triton_premise={self.triton_premise} kernelguard={self.kernelguard_check}",
             f"PMPP coverage: {self.n_self_checkable}/{self.n_tasks} tasks self-checkable, "
             f"{self.n_perf_gated} perf-gated, {self.n_hidden_shape} hidden-shape",
+            f"PMPP correctness: {self.correctness_inputs} "
+            f"randomized={self.n_randomized_correctness}/{self.n_tasks}",
         ]
 
     def as_json(self) -> dict:

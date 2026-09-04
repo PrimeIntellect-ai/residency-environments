@@ -169,7 +169,7 @@
       "n_subs": 2,
       "files": {
         "bench_penalty_filter_sample.cu": {
-          "sha256": "985bfd9485ad01295212b72e8c847df18a3f0f67c4fa1b1a41efe1bc8740aae2",
+          "sha256": "1934281e024df603a56179a240f53f58231144968f8f44ec58b9c3d6d07329e2",
           "source_sha256": "de066ac62cf986a27466b27f6d2e710f2320213acc0e8c10c506662141a7048f"
         },
         "penalty_filter_sample_common.h": {
@@ -185,7 +185,7 @@
           "source_sha256": "633d0e445d8456873d596f0fcf93b05e461aefff3817ddd5b6e6ea998733f7ee"
         },
         "test_penalty_filter_sample.cu": {
-          "sha256": "1acb351282e4b4d39f0105bfb726b3e8a0a8414fe5f4273a3ca82659153f77c7",
+          "sha256": "c79b42a48f949176ea91e07de020787b094ff5cf5d06bc85c313442c83cd3179",
           "source_sha256": "020311af2cf25e50cedf08db712bf5435d840a7910d3c99155f4e263d31d0f0a"
         }
       }

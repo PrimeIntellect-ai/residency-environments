@@ -15,7 +15,7 @@ import shutil
 import subprocess
 from typing import Callable, Literal
 
-from pmpp_hard import markers
+from pmpp_hard import grader_inputs, markers
 from pmpp_hard.config import LeverVector, PMPPHardConfig, PMPPHardTaskData
 from pmpp_hard.errors import PoolIntegrityError
 from pmpp_hard.paths import REF_NAMES, DataTree
@@ -998,6 +998,26 @@ def check_prompt_paths(ctx: PreflightContext) -> list[Finding]:
     return out
 
 
+def check_correctness_inputs(ctx: PreflightContext) -> list[Finding]:
+    findings = []
+    for task in _per_task(ctx):
+        if task.task_id not in grader_inputs.RANDOMIZED_TASKS:
+            continue
+        files = grader_files(ctx.tree.bundle(task.task_id))
+        try:
+            grader_inputs.validate_filename(task.task_id, [f.name for f in files])
+            for f in files:
+                if f.name.startswith("test_"):
+                    grader_inputs.render(
+                        task.task_id, f.read_bytes(), 0xD7B94CA163E5082F
+                    )
+        except PoolIntegrityError as error:
+            findings.append(
+                Finding("correctness_inputs", "ERROR", task.task_id, str(error))
+            )
+    return findings
+
+
 ALL_CHECKS: tuple[tuple[str, Callable], ...] = (
     ("compat_golden", check_compat_golden),
     ("starter_exists", check_starter_exists),
@@ -1013,6 +1033,7 @@ ALL_CHECKS: tuple[tuple[str, Callable], ...] = (
     ("sanity_leak", check_sanity_leak),
     ("sanity_ref_leak", check_sanity_ref_leak),
     ("sanity_stale", check_sanity_stale),
+    ("correctness_inputs", check_correctness_inputs),
     ("effective_pool", check_effective_pool),
     ("self_check_coverage", check_self_check_coverage),
     ("perf_census", check_perf_census),
