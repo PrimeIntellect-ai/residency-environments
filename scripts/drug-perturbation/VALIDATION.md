@@ -88,3 +88,36 @@ and both recorded live responses passed rescoring without changing their
 earlier scores. Lint, formatting, and both repository package checks passed.
 No new model generations were made. These are scoring/integration checks,
 not evidence that the caps eliminate all overprediction or improve learning.
+
+## Global answer-format gate and numeric parsing
+
+The whole deterministic reward is now zero unless every requested answer tag
+has exactly one nonempty, well-formed block in the final reply. Required
+viability values must be a single finite number, not a number extracted from
+prose or a placeholder. D×J inherits the same gate. The loader appends the
+explicit format contract to each prompt and hashes the actual augmented
+prompt; source data and source keys are unchanged.
+
+Local checks covered 61 structural rejection cases, 11 accepted numeric
+forms, 20 rejected numeric forms, and 24 native reward-mixture cases. These
+include case-varied duplicates, unmatched/partial delimiters, nested blocks,
+empty/missing fields, `-0.X`, multiple numbers, NaN/infinity, numeric overflow,
+leading-decimal and scientific notation, task-specific required fields, and
+zero-weight judge skipping. Earlier assistant turns and separate reasoning
+content do not contaminate final-answer validation. Simplified reproductions
+of both reported parser exploits now receive zero reward.
+
+All 186,854 train and 20,257 test rows loaded with unique source keys and
+correct augmented prompt hashes. Gold-formatted examples for all 33 selected
+task-view/phenotype combinations earned full credit; removing any required
+block gave zero. The target/pathway cap checks and both tool fixtures passed.
+Twenty of the 21 historical scoring fixtures remain unchanged. The fixture
+that intentionally accepted a number embedded in prose now receives zero,
+as required by the new numeric contract. All 32 archived response scores and
+both saved live response scores remain unchanged. Lint, formatting, and both
+repository package checks passed.
+
+No new model generations were made. The saved live traces used the earlier
+prompt and have only been rescored; the new prompt wording has not received
+a fresh live model evaluation. These checks establish local parser/reward
+behavior, not training improvements or format-compliance rates.

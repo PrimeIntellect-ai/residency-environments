@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -55,15 +56,34 @@ def hallmark_names() -> list[str]:
         return json.load(handle)
 
 
-def extract_tag(text: str, tag: str) -> str | None:
+def parse_tag(text: str, tag: str) -> tuple[str | None, str | None]:
+    """Extract one nonempty answer block, rejecting duplicate or broken delimiters."""
     if not isinstance(text, str):
+        return None, "missing"
+    tag = re.escape(tag)
+    markers = list(re.finditer(rf"<\s*(/?)\s*{tag}(?=[\s/>]|$)", text, re.IGNORECASE))
+    if not markers:
+        return None, "missing"
+    opening_count = sum(not marker.group(1) for marker in markers)
+    closing_count = len(markers) - opening_count
+    if opening_count > 1 or closing_count > 1:
+        return None, "duplicate"
+    match = re.search(rf"<{tag}>([^<>]*)</{tag}>", text, re.IGNORECASE | re.DOTALL)
+    if opening_count != 1 or closing_count != 1 or match is None:
+        return None, "malformed"
+    value = match.group(1).strip()
+    return (value, None) if value else (None, "empty")
+
+
+def extract_tag(text: str, tag: str) -> str | None:
+    return parse_tag(text, tag)[0]
+
+
+def parse_finite_number(text: str | None) -> float | None:
+    if text is None or not re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", text.strip()):
         return None
-    match = re.search(
-        rf"<{tag}>\s*(.*?)\s*</{tag}>",
-        text,
-        re.IGNORECASE | re.DOTALL,
-    )
-    return match.group(1).strip() if match else None
+    value = float(text.strip())
+    return value if math.isfinite(value) else None
 
 
 def parse_list(text: str | None) -> list[str]:
@@ -217,12 +237,8 @@ def score_pathway_direction_accuracy(
 def score_viability(pred_text: str | None, ground_truth: float | None) -> float:
     if ground_truth is None or pred_text is None:
         return 0.0
-    match = re.search(r"-?\d+\.?\d*", pred_text)
-    if not match:
-        return 0.0
-    try:
-        pred = float(match.group(0))
-    except ValueError:
+    pred = parse_finite_number(pred_text)
+    if pred is None:
         return 0.0
     error = abs(pred - ground_truth)
     if error <= VIABILITY_TOL_FULL:
@@ -271,7 +287,7 @@ def score_response(
     answer: str | dict[str, Any],
     weights: dict[str, float] | None = None,
 ) -> dict[str, float]:
-    """Return deterministic reward and biological metrics, enforcing answer-list limits."""
+    """Apply a whole-answer format gate after biological scoring and answer-list limits."""
     gt = parse_answer(answer)
     reward_weights = weights or DEFAULT_REWARD_WEIGHTS
 
@@ -319,19 +335,28 @@ def score_response(
         total_weight += reward_weights["phenotype"]
     aggregate = total / total_weight if total_weight > 0 else 0.0
 
-    checks: list[bool] = []
+    required_tags: list[str] = []
     if gt.get("target"):
-        checks.append(extract_tag(response, TARGET_TAG) is not None)
+        required_tags.append(TARGET_TAG)
     if gt.get("moa"):
-        checks.append(extract_tag(response, MOA_TAG) is not None)
+        required_tags.append(MOA_TAG)
     if pathway_pairs:
-        checks.append(extract_tag(response, PATHWAYS_TAG) is not None)
+        required_tags.append(PATHWAYS_TAG)
     if phenotype:
-        checks.append(extract_tag(response, PHENOTYPE_TAGS[phenotype]) is not None)
-    format_compliance = sum(checks) / len(checks) if checks else 0.0
+        required_tags.append(PHENOTYPE_TAGS[phenotype])
+    parsed = {tag: parse_tag(response, tag) for tag in required_tags}
+    issues = [issue for _, issue in parsed.values() if issue is not None]
+    invalid_numeric = (
+        phenotype == "viability"
+        and parsed[VIABILITY_TAG][0] is not None
+        and parse_finite_number(parsed[VIABILITY_TAG][0]) is None
+    )
+    valid_count = len(required_tags) - len(issues) - int(invalid_numeric)
+    format_compliance = valid_count / len(required_tags) if required_tags else 0.0
+    format_valid = bool(required_tags) and valid_count == len(required_tags)
 
     return {
-        "aggregate_reward": aggregate,
+        "aggregate_reward": aggregate if format_valid else 0.0,
         "target_score": target,
         "target_f1": target_f1,
         "target_prediction_count": float(target_count),
@@ -347,4 +372,11 @@ def score_response(
         "pathway_direction_accuracy": pathway_direction_accuracy,
         "phenotype_score": phenotype_score,
         "format_compliance": format_compliance,
+        "format_valid": float(format_valid),
+        "format_reward_before_gate": aggregate,
+        "format_missing_tags": float(issues.count("missing")),
+        "format_duplicate_tags": float(issues.count("duplicate")),
+        "format_malformed_tags": float(issues.count("malformed")),
+        "format_empty_tags": float(issues.count("empty")),
+        "format_invalid_numeric": float(invalid_numeric),
     }

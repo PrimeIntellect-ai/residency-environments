@@ -26,6 +26,10 @@ SPLIT_SHA256 = {
     "train": "a791ea9b1b4ad21dcd62241159f173727efafdfd8e57df5b233d04d054e169a1",
     "test": "933192b6106d8c449aca84b6598cdf8046cc93f76082dd84d1a289d7e98552b0",
 }
+FINAL_ANSWER_FORMAT = (
+    "Final-answer format: use each requested answer tag exactly once, with nonempty contents "
+    "and no nesting. Invalid format receives zero total reward."
+)
 
 EntryPoint = Literal[
     "smiles_only",
@@ -110,9 +114,11 @@ class DrugPerturbationTask(vf.Task[DrugPerturbationTaskData, vf.State, DrugPertu
         }
         metrics = {f"{name}_applicable": float(value) for name, value in requested.items()}
         metrics["deterministic_reward"] = scores["aggregate_reward"]
-        metrics["format_compliance"] = scores["format_compliance"]
         for name, value in scores.items():
-            if name in ("aggregate_reward", "format_compliance"):
+            if name == "aggregate_reward":
+                continue
+            if name.startswith("format_"):
+                metrics[name] = value
                 continue
             component = "pathways" if name.startswith("pathway_") else name.split("_")[0]
             if requested[component]:
@@ -229,11 +235,14 @@ class DrugPerturbationTaskset(vf.Taskset[DrugPerturbationTask, DrugPerturbationT
             ]
             if not sum(self.config.task.component_weights[name] for name in applicable):
                 raise ValueError(f"All requested biological components have zero weight for task {key}")
+            prompt = row["user_prompt"] + "\n\n" + FINAL_ANSWER_FORMAT
+            if answer.get("phenotype") == "viability":
+                prompt += " The VIABILITY block must contain only one finite number."
             yield DrugPerturbationTask(
                 DrugPerturbationTaskData(
                     idx=index,
                     name=f"{row['entry_point']}/{row['phenotype']}/{key[:12]}",
-                    prompt=row["user_prompt"],
+                    prompt=prompt,
                     network_allow=[],
                     answer=row["answer_json"],
                     compound=row["compound"],
@@ -241,7 +250,7 @@ class DrugPerturbationTaskset(vf.Taskset[DrugPerturbationTask, DrugPerturbationT
                     entry_point=row["entry_point"],
                     phenotype=row["phenotype"],
                     source_key=key,
-                    prompt_key=hashlib.sha256(row["user_prompt"].encode()).hexdigest(),
+                    prompt_key=hashlib.sha256(prompt.encode()).hexdigest(),
                     source_row=row["source_row"],
                 ),
                 self.config.task,

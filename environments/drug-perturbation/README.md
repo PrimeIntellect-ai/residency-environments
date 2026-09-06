@@ -78,9 +78,10 @@ Reference answers contain only the components requested by each prompt.
 | Pathways | Signed set F1, zero if more than five entries are supplied | 0.25 |
 | Phenotype | Viability tolerance score or categorical accuracy | 0.45 |
 
-The deterministic reward `D` is the weighted mean over applicable components,
-renormalized by their weights. An isolated pathway task therefore receives its
-pathway score, not 0.25 times that value. Component weights can be set through
+For a validly formatted response, the deterministic reward `D` is the weighted
+mean over applicable components, renormalized by their weights. An isolated
+pathway task therefore receives its pathway score, not 0.25 times that value.
+Component weights can be set through
 `env.taskset.task.component_weights`; selecting a task whose applicable
 components all have zero weight is an error.
 
@@ -88,8 +89,40 @@ For viability, absolute log2-fold-change error at most 0.25 earns 1; error at
 least 2 earns 0; intermediate errors are linearly interpolated. The categorical
 phenotypes use exact class accuracy. Signed pathway F1 ignores the
 `HALLMARK_` prefix and case; the separate pathway-name metrics use the known
-Hallmark vocabulary. Missing or malformed requested answers receive zero for
-that component. Format compliance is diagnostic, not an additional reward.
+Hallmark vocabulary. Incorrect biological answers receive their usual
+component scores, subject to the whole-answer format gate below.
+
+### Whole-answer format gate
+
+The final assistant reply must contain exactly one nonempty, well-formed block
+for every requested answer tag, matched case-insensitively. Missing, repeated,
+empty, nested, or broken required blocks make the entire D zero, even if other
+components are correct. The parser never chooses the first or last duplicate.
+Required tags depend on the task view; a mechanism-only task does not require
+target, pathway, or phenotype blocks. Earlier assistant/tool turns and separate
+reasoning content are not part of this check. Reasoning outside the answer
+blocks in the final reply remains allowed; angle-bracket markup inside an
+answer value is not allowed.
+
+A requested `<VIABILITY>` block must contain only one finite number, with
+optional surrounding whitespace. Signed decimals (including `.5`) and
+scientific notation are accepted. Placeholders such as `-0.X`, prose, ranges,
+multiple numbers, NaN, infinity, and floating-point overflow invalidate the
+whole answer. A wrong but valid number receives ordinary viability scoring.
+
+The loader appends this format requirement to each frozen prompt; the source
+dataset is unchanged, while `prompt_key` identifies the actual augmented
+prompt. This is a reward gate, not an additive format bonus or a penalty on
+just one biological component. It applies to D×J as well.
+
+`format_valid` records the global gate. `format_compliance` records the fraction
+of required fields with valid format. Missing, duplicate, malformed, and empty
+required tags and invalid numeric values have separate `format_*` diagnostics.
+`format_reward_before_gate` and biological metrics retain diagnostic credit
+from independently parseable components, but cannot contribute reward when
+the global gate fails.
+
+### Answer-list limits
 
 Target prompts ask for primary targets, not an exhaustive list of plausible
 genes. Supplying more than twice the number of unique, case-normalized gold
@@ -214,13 +247,16 @@ offline validation. The export helper is under `scripts/drug-perturbation/`.
 
 This port uses the deterministic scoring from the public
 [drug-perturbation-rl](https://github.com/swpo/drug-perturbation-rl) environment
-with two explicit reward changes: more than five pathway entries zero the
-pathway component, and more than twice an example's gold target count zero
-the target component. Raw target and signed pathway F1 remain available for
-comparison with prior results; the capped D and D×J are not the historical
-reward definition. It preserves the versioned continuous process rubric,
+with explicit reward changes: more than five pathway entries zero the pathway
+component, more than twice an example's gold target count zero the target
+component, and invalid answer format zeroes the whole reward. Viability uses
+strict finite-number parsing, and duplicate answer blocks are never selected.
+Raw target and signed pathway F1 remain available for uniquely parseable
+answers; the gated D and D×J are not the historical reward definition.
+It preserves the versioned continuous process rubric,
 removes the old role prompt, uses current Verifiers tasksets/toolsets, adds
-container/network restrictions, and bounds the optional neighbor count.
+container/network restrictions, bounds the optional neighbor count, and
+appends the explicit final-answer format requirement to the source prompts.
 Consequently, scoring parity does not
 claim byte-identical complete prompts, identical tool schemas, Hosted Lab
 compatibility, or equivalent stochastic RL trajectories.
