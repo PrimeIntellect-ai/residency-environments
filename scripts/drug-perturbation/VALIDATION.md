@@ -46,3 +46,19 @@ biological assessment is correct. This does not establish Hosted Lab training
 compatibility, alternative-harness isolation, or stochastic trajectory parity
 with earlier environment versions. Raw traces are not bundled with this
 environment contribution.
+
+## Five-pathway limit
+
+The pathway reward now becomes zero when the answer lists more than five
+entries, matching the prompt's requested count. The historical signed F1
+remains a raw metric, alongside the applied pathway score, entry count, and
+overflow flag. This is an explicit scoring change from the original port.
+
+Local validation covered 11 cases: empty, four, five, and six entries;
+duplicate, malformed, invalid-direction, and opposite-direction sixth
+entries; semicolon and newline separators; and blank separators. Native
+task scoring confirmed that other components retain credit and that the
+new D feeds both the default reward and optional D×J mixture. The 21 original
+scoring fixtures, 32 archived replays, and two recorded live responses retained
+their earlier scores. Lint, formatting, and both repository package checks
+also passed. No new model generations were needed for these scoring checks.

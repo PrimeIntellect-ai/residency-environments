@@ -75,12 +75,12 @@ Reference answers contain only the components requested by each prompt.
 | --- | --- | ---: |
 | Target | Gene-symbol set F1 | 0.15 |
 | Mechanism | Case/whitespace-normalized exact match | 0.15 |
-| Pathways | Set F1 of signed Hallmark-name/direction pairs | 0.25 |
+| Pathways | Signed set F1, zero if more than five entries are supplied | 0.25 |
 | Phenotype | Viability tolerance score or categorical accuracy | 0.45 |
 
 The deterministic reward `D` is the weighted mean over applicable components,
 renormalized by their weights. An isolated pathway task therefore receives its
-pathway F1, not 0.25 times that value. Component weights can be set through
+pathway score, not 0.25 times that value. Component weights can be set through
 `env.taskset.task.component_weights`; selecting a task whose applicable
 components all have zero weight is an error.
 
@@ -90,6 +90,16 @@ phenotypes use exact class accuracy. Signed pathway F1 ignores the
 `HALLMARK_` prefix and case; the separate pathway-name metrics use the known
 Hallmark vocabulary. Missing or malformed requested answers receive zero for
 that component. Format compliance is diagnostic, not an additional reward.
+
+Pathway prompts request five predictions. Supplying more than five nonempty
+comma-, semicolon-, or newline-separated entries inside `<PATHWAYS>` makes
+the pathway component zero; other components keep their usual scores. Count
+entries before deduplication or validity filtering, so duplicate or malformed
+extra entries cannot evade the limit. Blank separators are ignored. Answers
+with five or fewer entries retain ordinary signed set F1 and partial credit.
+No list is truncated. `pathway_signed_f1` remains the raw diagnostic F1;
+`pathway_score` is the value used in D. `pathway_prediction_count` and
+`pathway_count_overflow` record the length check.
 
 Raw metrics include `deterministic_reward`, `target_f1`, `moa_accuracy`,
 `pathway_signed_f1`, `pathway_name_validity`, `pathway_name_f1`,
@@ -184,10 +194,12 @@ duplicate rows as independent biological observations. A checksummed local
 copy of the original public table can be supplied via `dataset_path` for
 offline validation. The export helper is under `scripts/drug-perturbation/`.
 
-This port preserves deterministic scoring from the public
+This port uses the deterministic scoring from the public
 [drug-perturbation-rl](https://github.com/swpo/drug-perturbation-rl) environment
-and the versioned continuous process rubric. It removes the old role prompt,
-uses current Verifiers tasksets/toolsets, adds container/network restrictions,
+with one explicit reward change: more than five pathway entries now zero that
+component. Raw signed pathway F1 remains available for comparison with prior
+results. It preserves the versioned continuous process rubric, removes the old
+role prompt, uses current Verifiers tasksets/toolsets, adds container/network restrictions,
 and bounds the optional neighbor count. Consequently, scoring parity does not
 claim byte-identical complete prompts, identical tool schemas, Hosted Lab
 compatibility, or equivalent stochastic RL trajectories.

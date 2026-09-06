@@ -18,6 +18,7 @@ VIABILITY_TAG = "VIABILITY"
 CYCLE_TAG = "CELL_CYCLE"
 STRESS_TAG = "STRESS"
 MAGNITUDE_TAG = "MAGNITUDE"
+MAX_PATHWAY_ENTRIES = 5
 
 CYCLE_CLASSES = ["arrest", "no_effect", "proliferation"]
 STRESS_CLASSES = ["none", "apoptosis", "UPR", "DNA_damage"]
@@ -71,13 +72,16 @@ def parse_list(text: str | None) -> list[str]:
     return [part.strip().upper() for part in parts if part.strip()]
 
 
-def parse_pathway_pairs(text: str | None) -> list[tuple[str, str]]:
+def pathway_entries(text: str | None) -> list[str]:
     if not text:
         return []
+    return [token.strip() for token in re.split(r"[,;\n]", text) if token.strip()]
+
+
+def parse_pathway_pairs(text: str | None) -> list[tuple[str, str]]:
     output: list[tuple[str, str]] = []
-    for token in re.split(r"[,;\n]", text):
-        token = token.strip()
-        if not token or ":" not in token:
+    for token in pathway_entries(text):
+        if ":" not in token:
             continue
         name, direction = token.rsplit(":", 1)
         name = name.strip().upper()
@@ -141,6 +145,15 @@ def score_moa(pred_text: str | None, ground_truth: str | None) -> float:
 
 
 def score_pathways(
+    pred_text: str | None,
+    ground_truth: list[tuple[str, str]],
+) -> float:
+    if len(pathway_entries(pred_text)) > MAX_PATHWAY_ENTRIES:
+        return 0.0
+    return score_pathway_signed_f1(pred_text, ground_truth)
+
+
+def score_pathway_signed_f1(
     pred_text: str | None,
     ground_truth: list[tuple[str, str]],
 ) -> float:
@@ -247,7 +260,7 @@ def score_response(
     answer: str | dict[str, Any],
     weights: dict[str, float] | None = None,
 ) -> dict[str, float]:
-    """Return the exact deterministic reward and v0.10.3 component metrics."""
+    """Return deterministic reward and biological metrics, enforcing the five-pathway limit."""
     gt = parse_answer(answer)
     reward_weights = weights or DEFAULT_REWARD_WEIGHTS
 
@@ -257,6 +270,8 @@ def score_response(
     pathway_pairs = [tuple(pair) for pair in gt.get("pathways_signed") or []]
     pathway_text = extract_tag(response, PATHWAYS_TAG)
     pathways = score_pathways(pathway_text, pathway_pairs) if pathway_pairs else 0.0
+    pathway_f1 = score_pathway_signed_f1(pathway_text, pathway_pairs) if pathway_pairs else 0.0
+    pathway_count = len(pathway_entries(pathway_text))
     pathway_name_validity = score_pathway_name_validity(pathway_text) if pathway_pairs else 0.0
     pathway_name_f1 = score_pathway_name_f1(pathway_text, pathway_pairs) if pathway_pairs else 0.0
     pathway_direction_accuracy = score_pathway_direction_accuracy(pathway_text, pathway_pairs) if pathway_pairs else 0.0
@@ -303,7 +318,10 @@ def score_response(
         "aggregate_reward": aggregate,
         "target_f1": target,
         "moa_accuracy": moa,
-        "pathway_signed_f1": pathways,
+        "pathway_score": pathways,
+        "pathway_signed_f1": pathway_f1,
+        "pathway_prediction_count": float(pathway_count),
+        "pathway_count_overflow": float(pathway_count > MAX_PATHWAY_ENTRIES),
         "pathway_name_validity": pathway_name_validity,
         "pathway_name_f1": pathway_name_f1,
         "pathway_direction_accuracy": pathway_direction_accuracy,
