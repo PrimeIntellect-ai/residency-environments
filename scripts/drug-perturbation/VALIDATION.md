@@ -62,3 +62,29 @@ new D feeds both the default reward and optional D×J mixture. The 21 original
 scoring fixtures, 32 archived replays, and two recorded live responses retained
 their earlier scores. Lint, formatting, and both repository package checks
 also passed. No new model generations were needed for these scoring checks.
+
+## Per-example target limit
+
+The target reward now becomes zero above twice the number of unique,
+case-normalized gold targets for that example. Supplied entries are counted
+before deduplication; no list is truncated. Raw target F1 remains available
+alongside the applied target score, entry count, per-example limit, and
+overflow flag. This is the second explicit scoring change from the original
+port. Both caps apply within D, which also feeds D×J.
+
+Local validation covered 15 target cases: missing/empty answers, exact
+answers, the limit and first overflowing entry, duplicate/malformed extras,
+comma/pipe and blank separators, one-target references, duplicate/case-varied
+gold entries, partial matches below the limit, absent gold, and a synthetic
+201-entry answer with two of three gold targets. The last case retains a
+positive raw F1 but receives zero target reward.
+
+Six native reward-mixture checks covered target overflow alone and combined
+target/pathway overflow; other biological components retained their credit.
+An unrequested-target case confirmed null target metrics and unchanged
+reward. Zero-weight judge skipping still worked. All 11 pathway boundary
+cases, 21 original scoring fixtures, 32 archived replays, two tool fixtures,
+and both recorded live responses passed rescoring without changing their
+earlier scores. Lint, formatting, and both repository package checks passed.
+No new model generations were made. These are scoring/integration checks,
+not evidence that the caps eliminate all overprediction or improve learning.

@@ -73,7 +73,7 @@ Reference answers contain only the components requested by each prompt.
 
 | Component | Metric | Default weight |
 | --- | --- | ---: |
-| Target | Gene-symbol set F1 | 0.15 |
+| Target | Gene-symbol set F1, zero above twice the example's gold target count | 0.15 |
 | Mechanism | Case/whitespace-normalized exact match | 0.15 |
 | Pathways | Signed set F1, zero if more than five entries are supplied | 0.25 |
 | Phenotype | Viability tolerance score or categorical accuracy | 0.45 |
@@ -90,6 +90,24 @@ phenotypes use exact class accuracy. Signed pathway F1 ignores the
 `HALLMARK_` prefix and case; the separate pathway-name metrics use the known
 Hallmark vocabulary. Missing or malformed requested answers receive zero for
 that component. Format compliance is diagnostic, not an additional reward.
+
+Target prompts ask for primary targets, not an exhaustive list of plausible
+genes. Supplying more than twice the number of unique, case-normalized gold
+targets for that example makes the target component zero. For three gold
+targets, six predictions retain ordinary F1; seven receive zero. Count
+nonempty pipe- or comma-separated entries inside `<TARGET>` before
+deduplication, including duplicates and unrecognized symbols. Blank
+separators are ignored. Other components keep their usual scores, and no list
+is truncated. `target_f1` remains the raw diagnostic F1; `target_score` is
+the value used in D. `target_prediction_count`, `target_prediction_limit`,
+and `target_count_overflow` expose the check. Unrequested target metrics
+remain null.
+
+The target cap is a guardrail against excessive list expansion, not a complete
+solution to overprediction: uncertain guesses can still earn credit below
+the cap. The cutoff is discontinuous and gold target annotations may be
+incomplete, so these scores measure agreement with the benchmark references,
+not the completeness of all biologically valid drug targets.
 
 Pathway prompts request five predictions. Supplying more than five nonempty
 comma-, semicolon-, or newline-separated entries inside `<PATHWAYS>` makes
@@ -196,11 +214,14 @@ offline validation. The export helper is under `scripts/drug-perturbation/`.
 
 This port uses the deterministic scoring from the public
 [drug-perturbation-rl](https://github.com/swpo/drug-perturbation-rl) environment
-with one explicit reward change: more than five pathway entries now zero that
-component. Raw signed pathway F1 remains available for comparison with prior
-results. It preserves the versioned continuous process rubric, removes the old
-role prompt, uses current Verifiers tasksets/toolsets, adds container/network restrictions,
-and bounds the optional neighbor count. Consequently, scoring parity does not
+with two explicit reward changes: more than five pathway entries zero the
+pathway component, and more than twice an example's gold target count zero
+the target component. Raw target and signed pathway F1 remain available for
+comparison with prior results; the capped D and D×J are not the historical
+reward definition. It preserves the versioned continuous process rubric,
+removes the old role prompt, uses current Verifiers tasksets/toolsets, adds
+container/network restrictions, and bounds the optional neighbor count.
+Consequently, scoring parity does not
 claim byte-identical complete prompts, identical tool schemas, Hosted Lab
 compatibility, or equivalent stochastic RL trajectories.
 

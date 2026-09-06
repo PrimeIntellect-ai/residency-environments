@@ -19,6 +19,7 @@ CYCLE_TAG = "CELL_CYCLE"
 STRESS_TAG = "STRESS"
 MAGNITUDE_TAG = "MAGNITUDE"
 MAX_PATHWAY_ENTRIES = 5
+TARGET_COUNT_MULTIPLIER = 2
 
 CYCLE_CLASSES = ["arrest", "no_effect", "proliferation"]
 STRESS_CLASSES = ["none", "apoptosis", "UPR", "DNA_damage"]
@@ -129,7 +130,17 @@ def normalize_moa(value: str | None) -> str:
     return " ".join(value.lower().strip().split())
 
 
+def target_prediction_limit(ground_truth: list[str]) -> int:
+    return TARGET_COUNT_MULTIPLIER * len({gene.upper() for gene in ground_truth})
+
+
 def score_target(pred_text: str | None, ground_truth: list[str]) -> float:
+    if len(parse_list(pred_text)) > target_prediction_limit(ground_truth):
+        return 0.0
+    return score_target_f1(pred_text, ground_truth)
+
+
+def score_target_f1(pred_text: str | None, ground_truth: list[str]) -> float:
     if not ground_truth or pred_text is None:
         return 0.0
     return f1_set(
@@ -260,11 +271,16 @@ def score_response(
     answer: str | dict[str, Any],
     weights: dict[str, float] | None = None,
 ) -> dict[str, float]:
-    """Return deterministic reward and biological metrics, enforcing the five-pathway limit."""
+    """Return deterministic reward and biological metrics, enforcing answer-list limits."""
     gt = parse_answer(answer)
     reward_weights = weights or DEFAULT_REWARD_WEIGHTS
 
-    target = score_target(extract_tag(response, TARGET_TAG), gt["target"]) if gt.get("target") else 0.0
+    target_genes = gt.get("target") or []
+    target_text = extract_tag(response, TARGET_TAG)
+    target = score_target(target_text, target_genes)
+    target_f1 = score_target_f1(target_text, target_genes)
+    target_count = len(parse_list(target_text))
+    target_limit = target_prediction_limit(target_genes)
     moa = score_moa(extract_tag(response, MOA_TAG), gt["moa"]) if gt.get("moa") else 0.0
 
     pathway_pairs = [tuple(pair) for pair in gt.get("pathways_signed") or []]
@@ -316,7 +332,11 @@ def score_response(
 
     return {
         "aggregate_reward": aggregate,
-        "target_f1": target,
+        "target_score": target,
+        "target_f1": target_f1,
+        "target_prediction_count": float(target_count),
+        "target_prediction_limit": float(target_limit),
+        "target_count_overflow": float(target_count > target_limit),
         "moa_accuracy": moa,
         "pathway_score": pathways,
         "pathway_signed_f1": pathway_f1,
