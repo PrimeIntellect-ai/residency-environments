@@ -18,10 +18,10 @@ FRAMEWORK_ROUTE = "/alphaverse-framework"
 
 
 def _host_url(url: str) -> str:
-    """Translate Docker Desktop's agent-facing host alias back to host loopback."""
+    """Translate Verifiers' agent-facing Docker aliases for trusted host calls."""
 
     parts = urlsplit(url)
-    if parts.hostname != "host.docker.internal":
+    if parts.hostname not in {"host.docker.internal", "vf.host.internal"}:
         return url
     port = f":{parts.port}" if parts.port is not None else ""
     return urlunsplit(parts._replace(netloc=f"127.0.0.1{port}"))
@@ -90,6 +90,22 @@ async def call_framework(
             "request": json.dumps(request, separators=(",", ":")),
         },
     )
+
+
+async def release_trading_runtimes(trace: Any, mcp_urls: dict[str, str]) -> None:
+    """Release owned trading boxes before the Toolset's process is torn down."""
+    state = getattr(trace, "state", None)
+    token = getattr(state, "artifact_export_token", None)
+    if not token:
+        return  # Joined participant traces do not own the shared market.
+    try:
+        url = mcp_urls.get("alphaverse")
+        if not url:
+            raise RuntimeError("Alphaverse Toolset URL is unavailable for cleanup")
+        await call_framework(url, token, {"operation": "release_trading_runtimes"})
+    except Exception as exc:
+        state.infrastructure_error = f"trading-runtime cleanup failed: {type(exc).__name__}"
+        raise
 
 
 async def export_terminal_artifacts(

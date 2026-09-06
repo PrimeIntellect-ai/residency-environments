@@ -15,8 +15,9 @@ rollouts, and presentation assets are intentionally excluded.
 
 The primary objective metric is terminal realized PnL after transaction fees
 and terminal liquidation. The scalar reward divides PnL by a configurable scale
-(10,000 by default), clips the result, and subtracts explicit incomplete-
-liquidation or rollout-error penalties. The exchange also records volume, fills,
+(10,000 by default), clips the result, and subtracts an explicit incomplete-
+liquidation penalty. Infrastructure failures invalidate a rollout rather than
+becoming trading losses. The exchange also records volume, fills,
 orders, rejections, position, drawdown, margin events, strategy deployments,
 model usage, and inference cost as diagnostics.
 
@@ -69,6 +70,22 @@ The package also exposes `alphaverse_codex_harness`,
 experiments. The default `alphaverse` taskset remains a single-player evaluation
 and does not silently add an adaptive opponent.
 
+A short two-agent deployment/intermission/streaming check is available in
+[`configs/alphaverse/isolation-smoke.local.toml`](../../configs/alphaverse/isolation-smoke.local.toml).
+It deliberately prompts for mechanical actions and is not an economic benchmark:
+
+```bash
+uv run --no-sync eval @ configs/alphaverse/isolation-smoke.local.toml
+```
+
+A smaller single-agent Prime deployment/replacement/termination check is in
+[`configs/alphaverse/isolation-smoke.prime.toml`](../../configs/alphaverse/isolation-smoke.prime.toml).
+It creates short-lived paid micro-VMs and uses a directive mechanics prompt:
+
+```bash
+uv run --no-sync eval @ configs/alphaverse/isolation-smoke.prime.toml
+```
+
 ## Agent interface
 
 The complete agent-visible rules and API are bundled as:
@@ -85,13 +102,55 @@ Alphaverse harness adapters; stock harnesses can use the equivalent bounded
 
 ## Security boundary
 
-General agent internet access is blocked while Verifiers preserves model
-inference and Alphaverse MCP routes. Uploaded strategy source is restricted to
-the documented SDK and a small deterministic standard-library allowlist, and
-the child worker denies ordinary file, socket, process, reflection, dynamic-code,
-and private-package access.
+There are three placements, managed by Verifiers:
 
-The Python strategy policy is defense in depth, not a kernel-enforced sandbox
-for hostile code. Deployments accepting arbitrary untrusted human source should
-add a dedicated restricted container or Prime sandbox around each strategy
-worker.
+- **Exchange:** a non-colocated, evaluator-side Toolset (`SubprocessConfig`).
+  It owns matching, clearing, latent state, other participants, scoring, and
+  private artifacts. Only trusted environment code executes here.
+- **Research:** each agent's container or VM receives public documentation,
+  its own workspace, and authenticated market tools. General internet access is
+  blocked; Verifiers preserves inference and the assigned MCP routes.
+- **Trading:** each uploaded deployment gets a fresh runtime through native
+  `provision_runtime()` and a persistent `open_process()` channel. The default
+  is a Prime micro-VM with `allow=[]`; Docker with `allow=[]` is available for
+  local development. Subprocess placement, non-VM Prime placement, and outbound
+  network access are rejected. There is no host execution fallback.
+
+Trading runtimes receive only an explicit public-SDK file list and that firm's
+source. They receive no evaluator environment variables, shared filesystem,
+exchange package, other-firm source, or management credentials. A participant's
+initial strategy is supplied as self-contained source, exactly like an update.
+The strategy may use ordinary Python and its own local files. Syntax checking
+is not the security boundary; the framework's container/VM is.
+
+Only bounded JSON action batches cross back. The exchange validates their schema,
+callback ID, action count, ownership, and existing trading/risk rules; worker
+output never determines caller identity. Callback deadlines, memory/CPU limits,
+and bounded response/diagnostic sizes contain faulty programs. Docker's disk
+request is advisory, not a hard per-container quota; use Prime VMs for hostile
+multi-tenant evaluations. Isolation relies on Verifiers and the provider, not a
+claim that Python or containers are immune to platform vulnerabilities.
+
+Deployments are initialized before replacing the incumbent. Intermission updates
+keep their prepared runtime until reopen; a failed readiness check preserves the
+incumbent. Stop, replacement, termination, and Toolset teardown release runtimes.
+The market remains one implementation: the strategy bridge changes execution
+placement, not matching, accounting, market feeds, or the rules of trading.
+
+For an entirely local smoke test (Docker must be running):
+
+```bash
+uv run --no-sync eval alphaverse -n 1 -r 2 --env.agent.max-turns 4 \
+  --env.agent.runtime.type docker \
+  --env.taskset.task.toolset.strategy-runtime.type docker \
+  --env.taskset.task.toolset.strategy-runtime.allow '[]'
+```
+
+The empty `allow` list blocks trading-runtime egress. Provider credentials remain
+with the evaluator; they are not installed in either agent or trading runtimes.
+
+Each delivered strategy callback currently requires a synchronous round trip,
+even when it returns no actions. Local Docker and remote Prime use the same
+native Runtime API but different transports; wide-area latency can dominate
+long runs. Validate placement and callback throughput before scaling the horizon;
+the short isolation smoke does not establish six-hour cloud performance.

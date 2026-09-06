@@ -1,8 +1,17 @@
 """Seed materials for the first session-adaptive proprietary trader."""
 
+import inspect
+
+from alphaverse.reference_strategies import (
+    AdaptiveMarketMaker,
+    EventDrivenAdaptiveMarketMaker,
+    _best_price,
+    _timer_matches,
+)
+
 PROP_PARTICIPANT_ID = "prop"
 
-PROP_PASSIVE_BASELINE_SOURCE = '''from alphaverse.reference_strategies import EventDrivenAdaptiveMarketMaker
+_PROP_PASSIVE_BASELINE_TEMPLATE = '''
 
 
 class StrategyImpl(EventDrivenAdaptiveMarketMaker):
@@ -34,6 +43,25 @@ class StrategyImpl(EventDrivenAdaptiveMarketMaker):
             replenish_partial_fills=False,
         )
 '''
+
+
+def _passive_baseline_source() -> str:
+    """Ship only this firm's own seed implementation, not the participant package."""
+    imports = (
+        "from __future__ import annotations\n"
+        "import math\n"
+        "from collections.abc import Mapping, Sequence\n"
+        "from alphaverse import Side\n"
+        "from alphaverse.strategy import Action, InputEnvelope, Strategy, StrategyContext\n"
+    )
+    definitions = "\n\n".join(
+        inspect.getsource(value)
+        for value in (_best_price, _timer_matches, AdaptiveMarketMaker, EventDrivenAdaptiveMarketMaker)
+    )
+    return imports + "\n\n" + definitions + "\n\n" + _PROP_PASSIVE_BASELINE_TEMPLATE
+
+
+PROP_PASSIVE_BASELINE_SOURCE = _passive_baseline_source()
 
 
 _PROP_COMPETITIVE_BASELINE_TEMPLATE = '''from alphaverse import Side

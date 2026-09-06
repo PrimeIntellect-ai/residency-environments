@@ -195,8 +195,8 @@ Queues cancellation using the exchange order ID returned by a private
 
 ### `deploy_strategy(source, entrypoint="strategy:StrategyImpl")`
 
-Validates and launches the complete Python source string in a dedicated child
-process. A successful response includes an immutable SHA-256 version ID.
+Validates and launches the complete Python source string in your own isolated
+trading runtime. A successful response includes an immutable SHA-256 version ID.
 Redeploying preserves cash and position, stops the previous strategy, cancels
 its orders, and starts the new version.
 
@@ -212,21 +212,27 @@ from alphaverse import Side
 from alphaverse.strategy import Strategy, StrategyContext, InputEnvelope
 ```
 
-Uploaded modules may use the public SDK names shown above and named imports from
-a small deterministic standard-library allowlist (`collections`, `decimal`,
-`enum`, `fractions`, `functools`, `heapq`, `itertools`, `math`, `statistics`,
-and `typing`). Module imports, filesystem/network/process APIs, dynamic code,
-reflection helpers, dunder access, and private Alphaverse modules are rejected.
-Package third-party dependencies into your outer research workflow, not the
-deployed strategy.
+Uploaded modules may use the public SDK and Python standard library, including
+ordinary imports, introspection, and files in their own runtime. The runtime has
+no exchange implementation, other participants' source, or research-workspace
+files. Outbound network access is disabled. Third-party packages are not installed
+by deployment; keep those dependencies in your research workflow and deploy a
+self-contained strategy. Each new version starts with a fresh filesystem and
+Python state; exchange cash and position are preserved. Use `ctx.random` for
+reproducible strategy randomness.
+
+The exchange independently validates every returned action. Malformed or
+oversized output, callback deadlines, and resource violations stop the strategy;
+they do not grant access to exchange internals. Normal order rejects arrive on
+the private execution feed for your strategy to handle.
 
 Define `StrategyImpl(Strategy)`. Available callbacks are:
 
 ```python
 on_start(ctx, event)
-on_market(ctx, event)       # public trade or MBO event
-on_levels(ctx, event)       # coherent derived level snapshot
-on_execution(ctx, event)    # your private order/fill/account/session event
+on_market(ctx, event)  # public trade or MBO event
+on_levels(ctx, event)  # coherent derived level snapshot
+on_execution(ctx, event)  # your private order/fill/account/session event
 on_timer(ctx, event)
 on_risk(ctx, event)
 on_stop(ctx, event)

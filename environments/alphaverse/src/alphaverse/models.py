@@ -3,30 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum, IntEnum
+from enum import Enum
 from types import MappingProxyType
 from typing import Mapping, TypeAlias
+
+from alphaverse.public_types import Side
 
 MarketTime: TypeAlias = int
 Price: TypeAlias = int
 Quantity: TypeAlias = int
 Sequence: TypeAlias = int
-
-
-class Side(IntEnum):
-    """Order side with a useful signed-quantity representation."""
-
-    BUY = 1
-    SELL = -1
-
-    @property
-    def opposite(self) -> Side:
-        return Side(-self.value)
-
-    def signed(self, quantity: Quantity) -> Quantity:
-        if quantity <= 0:
-            raise ValueError("quantity must be positive")
-        return self.value * quantity
 
 
 @dataclass(frozen=True, slots=True)

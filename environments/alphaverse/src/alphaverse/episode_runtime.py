@@ -7,7 +7,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from alphaverse.artifacts import EpisodeArtifactWriter, archive_bundle, load_manifest
 from alphaverse.capture import select_market_capture_events
@@ -23,6 +23,9 @@ from alphaverse.prop_trader import prop_baseline_source
 from alphaverse.scenario import SECOND, create_populated_scenario, scenario_config_for_version
 from alphaverse.time_accounting import TimeMode
 from alphaverse.world import LatentDemandProfile
+
+if TYPE_CHECKING:
+    from verifiers.v1.runtimes import RuntimeConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +51,7 @@ class EpisodeRuntimeConfig:
     inline_artifact_max_bytes: int = 24 * 1024 * 1024
     artifact_transport: Literal["auto", "inline", "stream"] = "auto"
     artifact_export_chunk_bytes: int = 4 * 1024 * 1024
+    strategy_runtime: RuntimeConfig | None = None
 
 
 def event_record(cursor: int, event: Any) -> dict[str, object]:
@@ -138,6 +142,7 @@ class EpisodeRuntime:
             wall_time_scale=config.wall_time_scale,
             wall_quantum_ns=config.wall_quantum_ns,
             session_duration_ns=config.session_duration_ns,
+            strategy_runtime=config.strategy_runtime,
         )
 
         roster_id = config.opponent_roster_id or legacy_prop_roster_id(
@@ -146,18 +151,22 @@ class EpisodeRuntime:
             control_scope=config.prop_control_scope,
         )
         self.opponent_roster = opponent_roster(roster_id)
-        for slot in self.opponent_roster.slots:
-            self.state.add_participant(
-                ParticipantSpec(
-                    participant_id=slot.participant_id,
-                    strategy_version_id=(f"opponent-roster:{roster_id}:{slot.participant_id}"),
-                    account_starting_cash=config.starting_cash,
-                    technology=TechnologyProfile(),
-                    margin=margin,
-                    seed=config.scenario_seed + slot.seed_offset,
-                ),
-                baseline_source=prop_baseline_source(slot.seed_profile),
-            )
+        try:
+            for slot in self.opponent_roster.slots:
+                self.state.add_participant(
+                    ParticipantSpec(
+                        participant_id=slot.participant_id,
+                        strategy_version_id=(f"opponent-roster:{roster_id}:{slot.participant_id}"),
+                        account_starting_cash=config.starting_cash,
+                        technology=TechnologyProfile(),
+                        margin=margin,
+                        seed=config.scenario_seed + slot.seed_offset,
+                    ),
+                    baseline_source=prop_baseline_source(slot.seed_profile),
+                )
+        except BaseException:
+            self.state.close()
+            raise
         self._artifact_directory: Path | None = None
         self._artifact_manifest: dict[str, object] | None = None
         self._replay_projection: dict[str, object] | None = None
@@ -166,6 +175,9 @@ class EpisodeRuntime:
     @property
     def episode_id(self) -> str:
         return self.config.episode_id
+
+    def close(self) -> None:
+        self.state.close()
 
     def _observe(self, operation, *, participant_id: str = "player"):
         return self.state.observe_session(participant_id, operation)

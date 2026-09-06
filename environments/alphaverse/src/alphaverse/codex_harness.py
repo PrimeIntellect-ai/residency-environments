@@ -63,7 +63,7 @@ class AlphaverseCodexHarness(CodexHarness):
             mcp_urls,
             data,
         )
-        return ArtifactExportSession(inner)  # type: ignore[return-value]
+        return ArtifactExportSession(inner, mcp_urls)  # type: ignore[return-value]
 
 
 __all__ = ["AlphaverseCodexHarness"]

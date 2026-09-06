@@ -6,10 +6,12 @@ import os
 import tempfile
 from collections import deque
 from collections.abc import Iterator
+from contextlib import ExitStack
 from dataclasses import dataclass
 from fractions import Fraction
 from itertools import islice
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from alphaverse.clock import EventProcessingLimitExceeded
 from alphaverse.episode import ActionReceipt, Episode
@@ -26,6 +28,10 @@ from alphaverse.strategy import (
     Strategy,
     SubmitLimitOrder,
 )
+from alphaverse.strategy.errors import StrategyInfrastructureError
+
+if TYPE_CHECKING:
+    from verifiers.v1.runtimes import RuntimeConfig
 
 
 class _PlayerInbox:
@@ -203,6 +209,8 @@ class _CompositePlayerStrategy(Strategy):
             return None
         try:
             result = getattr(self.automation, method)(ctx, event)
+        except StrategyInfrastructureError:
+            raise
         except Exception as exc:
             self.fault = f"{type(exc).__name__}: {exc}"
             self.close()
@@ -316,6 +324,7 @@ class PlayerSession:
         *,
         simulation_step_ns: int = 5_000_000_000,
         max_scheduled_events_per_step: int = 250_000,
+        strategy_runtime: RuntimeConfig | None = None,
     ) -> None:
         if simulation_step_ns <= 0:
             raise ValueError("simulation_step_ns must be positive")
@@ -324,6 +333,7 @@ class PlayerSession:
         self.episode = episode
         self.participant_id = focal_spec.participant_id
         self.spec = focal_spec
+        self._strategy_runtime = strategy_runtime
         self._simulation_step_ns = simulation_step_ns
         self._max_scheduled_events_per_step = max_scheduled_events_per_step
         self._strategy = _PlayerStrategy()
@@ -332,6 +342,7 @@ class PlayerSession:
         self._last_strategy_fault: str | None = None
         self._deployments: list[StrategyDeploymentRecord] = []
         self._staged_deployment: StagedStrategyDeployment | None = None
+        self._staged_strategy: Strategy | None = None
         self._strategy_stop_count = 0
         self._acknowledged_alert_cursor = 0
         self.strategy_instance_id = episode.add_strategy(focal_spec, self._strategy)
@@ -743,7 +754,7 @@ class PlayerSession:
         return self._strategy.last_alert_cursor > self._acknowledged_alert_cursor
 
     def terminate(self) -> TerminationResult:
-        self._staged_deployment = None
+        self.discard_staged_source()
         self._finish_current_deployment("terminated")
         if self._automation is not None:
             self._automation.close()
@@ -775,7 +786,7 @@ class PlayerSession:
         *,
         entrypoint: str = "strategy:StrategyImpl",
     ) -> str:
-        from alphaverse.strategy.subprocess import StrategyArtifact
+        from alphaverse.strategy.artifact import StrategyArtifact
 
         artifact = StrategyArtifact.build(source, entrypoint=entrypoint)
         return self._deploy_artifact(artifact)
@@ -786,16 +797,24 @@ class PlayerSession:
         *,
         entrypoint: str = "strategy:StrategyImpl",
     ) -> str:
-        """Install evaluator-owned source that may use private strategy classes."""
+        """Install an evaluator-owned, self-contained seed in the same sandbox."""
 
-        from alphaverse.strategy.subprocess import StrategyArtifact
+        from alphaverse.strategy.artifact import StrategyArtifact
 
         artifact = StrategyArtifact.build_trusted(source, entrypoint=entrypoint)
         return self._deploy_artifact(artifact)
 
     def _deploy_artifact(self, artifact) -> str:
-        strategy = self._subprocess_strategy(artifact)
-        self._install_strategy(strategy)
+        strategy = self._isolated_strategy(artifact)
+        return self._deploy_prepared(artifact, strategy)
+
+    def _deploy_prepared(self, artifact, strategy) -> str:
+        try:
+            strategy.check_ready()
+            self._install_strategy(strategy)
+        except BaseException:
+            strategy.close()
+            raise
         self._strategy_version_id = artifact.version_id
         self._deployments.append(
             StrategyDeploymentRecord(
@@ -816,14 +835,16 @@ class PlayerSession:
     ) -> str:
         """Validate a source artifact without changing the live strategy."""
 
-        from alphaverse.strategy.subprocess import StrategyArtifact
+        from alphaverse.strategy.artifact import StrategyArtifact
 
         artifact = StrategyArtifact.build(source, entrypoint=entrypoint)
-        # Building an artifact only validates syntax and the entrypoint name.
-        # Start the isolated worker as well so constructor/import failures are
-        # reported during the deployment turn, not at the atomic market reopen.
-        candidate = self._subprocess_strategy(artifact)
-        candidate.close()
+        candidate = self._isolated_strategy(artifact)
+        try:
+            self.discard_staged_source()
+        except BaseException:
+            candidate.close()
+            raise
+        self._staged_strategy = candidate
         self._staged_deployment = StagedStrategyDeployment(
             version_id=artifact.version_id,
             entrypoint=artifact.entrypoint,
@@ -832,10 +853,10 @@ class PlayerSession:
         )
         return artifact.version_id
 
-    def _subprocess_strategy(self, artifact):
-        from alphaverse.strategy.subprocess import SubprocessStrategy
+    def _isolated_strategy(self, artifact):
+        from alphaverse.strategy.runtime import RuntimeStrategy
 
-        return SubprocessStrategy(
+        return RuntimeStrategy(
             artifact,
             participant_id=self.participant_id,
             strategy_instance_id=self.strategy_instance_id,
@@ -845,11 +866,15 @@ class PlayerSession:
             max_actions_per_callback=self.spec.risk.max_actions_per_callback,
             callback_timeout_ns=self.spec.technology.callback_timeout_ns,
             memory_limit_bytes=self.spec.technology.callback_memory_limit_bytes,
+            runtime_config=self._strategy_runtime,
         )
 
     def discard_staged_source(self, fault: str | None = None) -> None:
         """Leave the incumbent live after a staged activation failure."""
 
+        if self._staged_strategy is not None:
+            self._staged_strategy.close()
+            self._staged_strategy = None
         self._staged_deployment = None
         if fault:
             self._last_strategy_fault = fault
@@ -860,14 +885,26 @@ class PlayerSession:
         staged = self._staged_deployment
         if staged is None:
             return None
-        version_id = self.deploy_source(
-            staged.source,
-            entrypoint=staged.entrypoint,
-        )
+        from alphaverse.strategy.artifact import StrategyArtifact
+
+        candidate = self._staged_strategy
+        if candidate is None:
+            raise RuntimeError("staged deployment has no prepared runtime")
+        artifact = StrategyArtifact(staged.version_id, staged.entrypoint, staged.source)
+        version_id = self._deploy_prepared(artifact, candidate)
         if version_id != staged.version_id:  # pragma: no cover - content invariant
             raise RuntimeError("staged strategy version changed during activation")
         self._staged_deployment = None
+        self._staged_strategy = None
         return version_id
+
+    def close(self) -> None:
+        """Release trading resources without changing clearing or market time."""
+        with ExitStack() as stack:
+            if self._automation is not None:
+                stack.callback(self._automation.close)
+            self._automation = None
+            stack.callback(self.discard_staged_source)
 
     def stop_strategy(self) -> None:
         if self._automation is not None:

@@ -5,6 +5,7 @@ The exchange runs inside a non-colocated, task-scoped Toolset runtime.
 
 import json
 import secrets
+from contextlib import contextmanager
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -15,6 +16,8 @@ from alphaverse.artifact_egress import FRAMEWORK_ROUTE
 from alphaverse.capture import market_capture_spec as build_market_capture_spec
 from alphaverse.episode_runtime import EpisodeRuntime, EpisodeRuntimeConfig
 from alphaverse.prop_trader import PROP_PARTICIPANT_ID, competitive_prop_source
+from alphaverse.strategy.errors import StrategyInfrastructureError
+from alphaverse.strategy.runtime import validate_trading_runtime
 from alphaverse.workspace import install_task_workspace
 from alphaverse.world import LatentDemandProfile
 
@@ -22,18 +25,9 @@ from alphaverse.world import LatentDemandProfile
 def _mcp_query_value(name: str) -> str | None:
     """Read one role-routing query value from the active MCP request."""
 
-    from mcp.server.lowlevel.server import request_ctx
+    from verifiers.v1.mcp.server import _request_query
 
-    try:
-        request = request_ctx.get().request
-    except LookupError:
-        return None
-    if request is None:
-        return None
-    values = request.query_params.getlist(name)
-    if len(values) > 1:
-        raise ValueError(f"duplicate {name!r} role coordinate")
-    return values[0] if values else None
+    return _request_query(name)
 
 
 _DEFAULT_PROMPT = """You are playing Alphaverse, an automated trading game.
@@ -121,6 +115,7 @@ class AlphaverseState(vf.State):
     participant_id: str = "player"
     prop_access_token: str | None = None
     toolset_url: str | None = None
+    infrastructure_error: str | None = None
 
 
 class AlphaverseToolsetConfig(vf.ToolsetConfig):
@@ -129,6 +124,8 @@ class AlphaverseToolsetConfig(vf.ToolsetConfig):
     model_config = ConfigDict(extra="forbid")
 
     colocated: Literal[False] = False
+    runtime: vf.SubprocessConfig = Field(default_factory=vf.SubprocessConfig)
+    strategy_runtime: vf.RuntimeConfig = Field(default_factory=lambda: vf.PrimeConfig(allow=[], cpu=1, memory=1))
     artifact_root: str = "/tmp/alphaverse-artifacts"
     inline_artifact_max_bytes: int = Field(default=24 * 1024 * 1024, gt=0)
     artifact_transport: Literal["auto", "inline", "stream"] = "auto"
@@ -148,6 +145,11 @@ class AlphaverseToolsetConfig(vf.ToolsetConfig):
     prop_control_scope: Literal["full_source", "knobs"] = "full_source"
     opponent_roster_id: str | None = None
     session_duration_ns: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def require_isolated_trading_runtime(self) -> "AlphaverseToolsetConfig":
+        validate_trading_runtime(self.strategy_runtime)
+        return self
 
 
 class PropStrategyKnobs(BaseModel):
@@ -316,8 +318,10 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
                 inline_artifact_max_bytes=self.config.inline_artifact_max_bytes,
                 artifact_transport=self.config.artifact_transport,
                 artifact_export_chunk_bytes=(self.config.artifact_export_chunk_bytes),
+                strategy_runtime=self.config.strategy_runtime,
             )
         )
+        self._exit_stack.callback(self._runtime.close)
         return self._runtime
 
     def _episode_id(self) -> str:
@@ -347,7 +351,7 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         query: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         participant_id = self._embedded_participant_id()
-        try:
+        with self._market_operation():
             response = self._embedded_call(
                 method,
                 suffix,
@@ -355,16 +359,28 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
                 query=query or {},
                 participant_id=participant_id,
             )
+        self._update_state(response, participant_id=participant_id)
+        return response
+
+    @contextmanager
+    def _market_operation(self):
+        if self.state.infrastructure_error:
+            raise StrategyInfrastructureError(self.state.infrastructure_error)
+        try:
+            yield self._embedded()
+        except StrategyInfrastructureError as exc:
+            self.state.infrastructure_error = str(exc)
+            raise
         finally:
-            terminal = self._embedded().sync_terminal()
+            terminal = None
+            if self._runtime is not None and not self.state.infrastructure_error:
+                terminal = self._runtime.sync_terminal()
             if terminal is not None:
                 # A domain operation may discover that the horizon finalized
                 # the episode and then raise. Synchronize terminal state even
                 # on that error path so the harness can export before teardown.
                 self.state.terminal_summary = terminal
                 self.state.terminated = True
-        self._update_state(response, participant_id=participant_id)
-        return response
 
     def _embedded_call(
         self,
@@ -530,13 +546,14 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         """Return one bounded page of raw delivered capture records."""
 
         participant_id = self._embedded_participant_id()
-        response = self._embedded().capture(
-            feed,
-            after_cursor,
-            through_cursor=through_cursor,
-            limit=limit,
-            participant_id=participant_id,
-        )
+        with self._market_operation() as runtime:
+            response = runtime.capture(
+                feed,
+                after_cursor,
+                through_cursor=through_cursor,
+                limit=limit,
+                participant_id=participant_id,
+            )
         self._update_state(response, participant_id=participant_id)
         return response
 
@@ -556,24 +573,29 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         operation = payload.get("operation")
         export_token = self.state.artifact_export_token
         if export_token and secrets.compare_digest(capability, export_token):
+            if operation == "release_trading_runtimes":
+                if self._runtime is not None:
+                    self._runtime.close()
+                return {"released": True}
             if operation != "artifact_chunk" or not self.state.terminated:
                 raise PermissionError("invalid framework request")
-            return self._embedded().export_artifact_file(
-                path=str(payload.get("path", "")),
-                offset=int(payload.get("offset", 0)),
-                max_bytes=int(payload.get("max_bytes", 4 * 1024 * 1024)),
-            )
+            with self._market_operation() as runtime:
+                return runtime.export_artifact_file(
+                    path=str(payload.get("path", "")),
+                    offset=int(payload.get("offset", 0)),
+                    max_bytes=int(payload.get("max_bytes", 4 * 1024 * 1024)),
+                )
         control_token = self.state.coordination_token
         if not control_token or not secrets.compare_digest(capability, control_token):
             raise PermissionError("invalid framework capability")
-        runtime = self._embedded()
-        if operation == "resume":
-            return runtime.resume_market_session()
-        if operation != "participant_result" or payload.get("participant_id") != PROP_PARTICIPANT_ID:
-            raise PermissionError("invalid framework request")
-        summary = runtime.participant_terminal_summary(PROP_PARTICIPANT_ID)
-        summary["shared_episode_owner"] = "player"
-        return summary
+        with self._market_operation() as runtime:
+            if operation == "resume":
+                return runtime.resume_market_session()
+            if operation != "participant_result" or payload.get("participant_id") != PROP_PARTICIPANT_ID:
+                raise PermissionError("invalid framework request")
+            summary = runtime.participant_terminal_summary(PROP_PARTICIPANT_ID)
+            summary["shared_episode_owner"] = "player"
+            return summary
 
     @vf.tool
     async def open_orders(self) -> dict[str, Any]:
@@ -700,6 +722,8 @@ class AlphaverseKnobPropToolset(AlphaversePropToolset):
 class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConfig]):
     """Episode lifecycle, termination condition, and authoritative scoring."""
 
+    NEEDS_CONTAINER = True
+
     @classmethod
     def toolsets(cls, config: AlphaverseTaskConfig) -> list[vf.Toolset]:
         """Launch one evaluator-owned market Toolset for each rollout."""
@@ -733,6 +757,8 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
             trace.state.coordination_token = secrets.token_urlsafe(32)
 
     async def finalize(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
+        if trace.state.infrastructure_error:
+            raise StrategyInfrastructureError(trace.state.infrastructure_error)
         summary = trace.state.terminal_summary
         if isinstance(summary, dict):
             trace.state.terminated = True
@@ -768,6 +794,8 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
 
     @vf.stop
     async def session_terminated(self, trace: vf.Trace) -> bool:
+        if trace.state.infrastructure_error:
+            return True
         # A terminal market is not enough to tear down a task-scoped Toolset.
         # Its terminal tool response must first reach the harness, and the
         # harness must finish any artifact stream while the server is alive.

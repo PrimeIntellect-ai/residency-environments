@@ -10,7 +10,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import TypeAlias
 
-from alphaverse.models import Side
+from alphaverse.public_types import Side
 
 WireScalar: TypeAlias = str | int | float | bool | None
 WireValue: TypeAlias = WireScalar | tuple["WireValue", ...] | Mapping[str, "WireValue"]

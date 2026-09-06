@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from fractions import Fraction
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from alphaverse.episode import Episode
 from alphaverse.evaluation_series import build_evaluation_series
@@ -16,10 +16,14 @@ from alphaverse.exchange import SessionState
 from alphaverse.models import EventKind
 from alphaverse.player import PlayerSession, WaitResult
 from alphaverse.profiles import ParticipantSpec
+from alphaverse.strategy.errors import StrategyInfrastructureError
 from alphaverse.time_accounting import (
     EpisodeTimeController,
     TimeMode,
 )
+
+if TYPE_CHECKING:
+    from verifiers.v1.runtimes import RuntimeConfig
 
 
 class EpisodeFinalized(RuntimeError):
@@ -128,6 +132,7 @@ class EpisodeState:
         wall_time_scale: float = 1.0,
         wall_quantum_ns: int = 1_000_000,
         session_duration_ns: int | None = None,
+        strategy_runtime: RuntimeConfig | None = None,
     ) -> None:
         if not episode_id:
             raise ValueError("episode_id must not be empty")
@@ -147,7 +152,8 @@ class EpisodeState:
         owned_episode = episode or Episode(session_id=episode_id)
         if max_market_time is not None and max_market_time < owned_episode.now:
             raise ValueError("max_market_time precedes the episode start")
-        session = PlayerSession(owned_episode, focal_spec)
+        self._strategy_runtime = strategy_runtime
+        session = PlayerSession(owned_episode, focal_spec, strategy_runtime=strategy_runtime)
         time_controller = EpisodeTimeController(
             session,
             mode=time_mode,
@@ -191,12 +197,11 @@ class EpisodeState:
                 raise EpisodeFinalized(f"episode is finalized: {record.episode_id}")
             if spec.participant_id in record.sessions:
                 raise ValueError(f"participant already exists: {spec.participant_id}")
-            session = PlayerSession(record.session.episode, spec)
-            if baseline_source is not None:
-                # Seed source is evaluator-owned. Later role deployments use the
-                # ordinary untrusted path and cannot import private participants.
-                session.deploy_trusted_source(baseline_source)
+            session = PlayerSession(record.session.episode, spec, strategy_runtime=self._strategy_runtime)
             record.sessions[spec.participant_id] = session
+            if baseline_source is not None:
+                # Seed and later uploads execute in the same isolated runtime type.
+                session.deploy_trusted_source(baseline_source)
 
     def with_session(
         self,
@@ -387,6 +392,8 @@ class EpisodeState:
                 session = record.sessions[participant_id]
                 try:
                     session.activate_staged_source()
+                except StrategyInfrastructureError:
+                    raise
                 except Exception as exc:
                     # Candidate validation normally catches constructor/import
                     # errors during the research turn. A later nondeterministic
@@ -477,6 +484,11 @@ class EpisodeState:
             return record.sessions[participant_id]
         except KeyError as exc:
             raise ValueError(f"unknown participant: {participant_id}") from exc
+
+    def close(self) -> None:
+        with self._access_record() as record, ExitStack() as stack:
+            for session in record.sessions.values():
+                stack.callback(session.close)
 
     def _finalize(self, record: _EpisodeRecord) -> EpisodeMetrics:
         if record.terminal_metrics is None:

@@ -37,6 +37,12 @@ async def install_capture_session(
 class AlphaverseHarness(BashHarness):
     """Bash harness with private capture transport and artifact export."""
 
+    async def session(self, ctx, trace, runtime, endpoint, secret, mcp_urls, data, tool_interception_url=None):
+        from alphaverse.acp_harness import ArtifactExportSession
+
+        inner = await super().session(ctx, trace, runtime, endpoint, secret, mcp_urls, data, tool_interception_url)
+        return ArtifactExportSession(inner, mcp_urls)
+
     async def launch(
         self,
         ctx: ModelContext,

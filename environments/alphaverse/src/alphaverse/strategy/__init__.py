@@ -15,7 +15,6 @@ from alphaverse.strategy.protocol import (
     SubmitLimitOrder,
 )
 from alphaverse.strategy.sdk import Strategy, StrategyContext, StrategyRunner
-from alphaverse.strategy.subprocess import StrategyArtifact, SubprocessStrategy
 
 __all__ = [
     "Action",
@@ -32,7 +31,5 @@ __all__ = [
     "Strategy",
     "StrategyContext",
     "StrategyRunner",
-    "StrategyArtifact",
-    "SubprocessStrategy",
     "SubmitLimitOrder",
 ]

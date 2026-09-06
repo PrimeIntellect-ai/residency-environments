@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from random import Random
 
-from alphaverse.models import Side
+from alphaverse.public_types import Side
 from alphaverse.strategy.protocol import (
     Action,
     ActionBatch,

@@ -1,6 +1,6 @@
 """Public strategy symbol plus lazy Verifiers plugin exports."""
 
-from alphaverse.models import Side
+from alphaverse.public_types import Side
 
 __all__ = ["AlphaverseHarness", "AlphaverseTaskset", "Side"]
 
