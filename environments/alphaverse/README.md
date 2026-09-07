@@ -26,6 +26,14 @@ taskset exposes five balanced-demand seeds with a 1,800-second virtual-market
 horizon; command-line configuration can change the seed count, demand profile,
 horizon, capital, margin, clock, participant roster, and adaptive-prop settings.
 
+Each task is one seeded example. Multiple rollouts of that task reuse its seed
+and initial market; the task count does not introduce different seeds within a
+rollout group. The default `time_mode="manual"` uses deterministic virtual time:
+inference latency and infrastructure delays do not advance the market, while
+explicit waits process scheduled events. The same seed and ordered actions at
+the same simulated times reproduce the market trajectory. Wall-clock mode is
+available only by explicit configuration and is not latency-independent.
+
 ## Mechanics
 
 - One perpetual futures-like instrument with integer ticks and price-time FIFO.

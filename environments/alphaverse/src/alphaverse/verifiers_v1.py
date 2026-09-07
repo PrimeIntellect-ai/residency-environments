@@ -36,8 +36,8 @@ Read README.md and API.md in your workspace. Your goal is to maximize terminal
 realized profit and loss (PnL). You decide how to research, trade, use automated
 strategies, and manage the session.
 
-Market time advances while you think and during explicit waits, whether or not
-a strategy is deployed. Ending the session cancels live orders and aggressively
+Explicit waits advance market time whether or not a strategy is deployed.
+Ending the session cancels live orders and aggressively
 liquidates remaining inventory; fees and liquidation slippage count toward PnL.
 Call terminate_session when you choose to finish.
 """
@@ -47,16 +47,22 @@ def _prompt_with_limits(
     prompt: str,
     cap_ns: int | None,
     model_turn_cap: int | None,
+    time_mode: Literal["manual", "wall"] = "manual",
 ) -> str:
     """Add configured limits as neutral constraints, not a workflow."""
 
-    constraints: list[str] = []
+    constraints = [
+        "The market uses deterministic virtual time. Model inference and runtime "
+        "delays do not advance the market; explicit waits do."
+        if time_mode == "manual"
+        else "This episode uses wall-clock time: the market advances while you think, as well as during explicit waits."
+    ]
     if cap_ns is not None:
         seconds = cap_ns / 1_000_000_000
         constraints.append(
             f"You have exactly {cap_ns} ns ({seconds:g} seconds) of market time "
             "in this episode. Maximize terminal realized PnL over that horizon. "
-            "The horizon applies to total market time, including research and "
+            "The horizon applies to total simulated market time, including "
             "periods when no automated strategy is deployed. At the horizon, "
             "live orders are cancelled and remaining inventory is liquidated "
             "through ordinary book liquidity. You may terminate earlier."
@@ -134,7 +140,7 @@ class AlphaverseToolsetConfig(vf.ToolsetConfig):
         ge=64 * 1024,
         le=8 * 1024 * 1024,
     )
-    time_mode: Literal["manual", "wall"] = "wall"
+    time_mode: Literal["manual", "wall"] = "manual"
     wall_time_scale: float = Field(default=1.0, ge=0)
     wall_quantum_ns: int = Field(default=1_000_000, gt=0)
     initial_margin_per_contract: int = Field(default=5_000, gt=0)
@@ -184,7 +190,7 @@ class AlphaverseTaskConfig(vf.TaskConfig):
     model_config = ConfigDict(extra="forbid")
 
     toolset: AlphaverseToolsetConfig = AlphaverseToolsetConfig()
-    time_mode: Literal["manual", "wall"] = "wall"
+    time_mode: Literal["manual", "wall"] = "manual"
     wall_time_scale: float = Field(default=1.0, ge=0)
     wall_quantum_ns: int = Field(default=1_000_000, gt=0)
     initial_margin_per_contract: int = Field(default=5_000, gt=0)
@@ -975,6 +981,7 @@ class AlphaverseTaskset(vf.Taskset[AlphaverseTask, AlphaverseTasksetConfig]):
                         config.prompt,
                         config.max_market_time_ns,
                         config.model_turn_cap,
+                        config.task.time_mode,
                     ),
                     scenario_seed=config.seed + index,
                     scenario_version=config.scenario_version,

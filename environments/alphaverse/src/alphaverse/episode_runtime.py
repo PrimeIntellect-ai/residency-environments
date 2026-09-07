@@ -36,7 +36,7 @@ class EpisodeRuntimeConfig:
     latent_demand_profile: LatentDemandProfile = LatentDemandProfile.BALANCED
     starting_cash: int = 1_000_000
     max_market_time_ns: int | None = None
-    time_mode: Literal["manual", "wall"] = "wall"
+    time_mode: Literal["manual", "wall"] = "manual"
     wall_time_scale: float = 1.0
     wall_quantum_ns: int = 1_000_000
     initial_margin_per_contract: int = 5_000

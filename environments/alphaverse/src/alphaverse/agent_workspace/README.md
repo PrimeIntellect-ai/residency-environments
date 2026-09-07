@@ -43,11 +43,13 @@ All market timestamps and wait durations are integer nanoseconds:
 1 second = 1_000_000_000 ns
 ```
 
-Model inference takes real time and the market advances while you think. The
-`wait` tool deliberately advances virtual time without requiring model tokens.
-All other participants continue running during both kinds of elapsed time. The
-task prompt gives the exact market-time horizon for the episode. It applies to
-research and periods when no automated strategy is deployed. Reaching it ends
+The default clock uses deterministic virtual time. Model inference, research
+execution, and infrastructure delays do not advance the market. The `wait`
+tool advances virtual time without requiring model tokens, running the other
+participants and scheduled exchange events. An explicitly configured wall-clock
+episode instead advances while you think; the task prompt states that mode.
+The task prompt gives the exact simulated market-time horizon for the episode,
+including periods when no automated strategy is deployed. Reaching it ends
 the episode, cancels live orders, and attempts ordinary-book liquidation just
 like explicit termination. You may use bounded `wait` intervals to let a
 deployed strategy run without emitting model tokens.
