@@ -1,0 +1,42 @@
+# Overlay on a current prime-rl training config, not a standalone launch recipe.
+# Ratios weight source sampling; they do not fix post-filter gradient shares.
+# Review the Hosted Lab schema/runtime separately before using this there.
+[[orchestrator.train.source]]
+name = "drug-target"
+ratio = 1
+env.taskset.id = "drug-perturbation"
+env.taskset.split = "train"
+env.taskset.entry_points = ["target_from_smiles"]
+env.agent.harness.id = "null"
+env.agent.runtime.type = "docker"
+env.agent.max_turns = 5
+
+[[orchestrator.train.source]]
+name = "drug-mechanism"
+ratio = 1
+env.taskset.id = "drug-perturbation"
+env.taskset.split = "train"
+env.taskset.entry_points = ["moa_from_target"]
+env.agent.harness.id = "null"
+env.agent.runtime.type = "docker"
+env.agent.max_turns = 5
+
+[[orchestrator.train.source]]
+name = "drug-pathways"
+ratio = 1
+env.taskset.id = "drug-perturbation"
+env.taskset.split = "train"
+env.taskset.entry_points = ["pathways_from_moa"]
+env.agent.harness.id = "null"
+env.agent.runtime.type = "docker"
+env.agent.max_turns = 5
+
+[[orchestrator.train.source]]
+name = "drug-phenotype"
+ratio = 1
+env.taskset.id = "drug-perturbation"
+env.taskset.split = "train"
+env.taskset.entry_points = ["phenotype_from_pathways"]
+env.agent.harness.id = "null"
+env.agent.runtime.type = "docker"
+env.agent.max_turns = 5
