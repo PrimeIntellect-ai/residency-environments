@@ -9,7 +9,7 @@ import dataclasses
 import pathlib
 from typing import Literal
 
-from pmpp_hard import grader_inputs, markers
+from pmpp_hard import benchmarks, grader_inputs, markers
 from pmpp_hard.config import PMPPHardConfig, PMPPHardTaskData
 from pmpp_hard.errors import ScoreInfraError
 from pmpp_hard.paths import DataTree, Workspace
@@ -91,6 +91,8 @@ async def provision_grader(
         if not provisionable(f):
             continue
         content = f.read_bytes()
+        if f.name.startswith("bench_") and f.suffix == ".cu":
+            content = benchmarks.prepare_source(task.task_id, content)
         if correctness_parameter is not None and f.name.startswith("test_"):
             content = grader_inputs.render(task.task_id, content, correctness_parameter)
         await ws.write(f".grader/{f.name}", content)

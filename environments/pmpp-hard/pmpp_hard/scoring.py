@@ -8,14 +8,13 @@ residency, and KernelGuard checks provide additional validation.
 
 import asyncio
 import contextlib
-import os
 import re
 import shutil
 import statistics
 import subprocess
 import uuid
 
-from pmpp_hard import grader_inputs, kernelguard_gate, markers, residency
+from pmpp_hard import benchmarks, grader_inputs, kernelguard_gate, markers, residency
 from pmpp_hard.config import DEFAULT_SCORE_IMAGES, PMPPHardConfig, PMPPHardTaskData
 from pmpp_hard.errors import ScoreInfraError
 from pmpp_hard.paths import DataTree, Workspace
@@ -368,9 +367,9 @@ async def perf_paired(
 ) -> bool:
     """Compare interleaved student and reference timings in one runtime.
 
-    Student and reference builds remain separate so reference failures are
-    reported as infrastructure errors. Per-run samples are retained for later
-    performance-gate calibration.
+    Every requested pair must exit successfully with matching output digests.
+    Reference failures are infrastructure errors. Seed, individual samples and
+    process log tails stay in private trace metadata, including on failure.
     """
     ref = tree.find_reference(task.task_id)
     if ref is None:
@@ -378,10 +377,27 @@ async def perf_paired(
             f"release reference missing for perf-gated task {task.task_id}"
         )
     await runtime.write(f"/app/.grader/{ref.name}", ref.read_bytes())
+    for source in tree.bundle(task.task_id).glob("bench_*"):
+        if source.suffix not in {".cu", ".py"}:
+            continue
+        await runtime.write(
+            f"/app/.grader/{source.name}",
+            benchmarks.prepare_source(task.task_id, source.read_bytes()),
+        )
     sf, runs = task.student_file, config.perf_ratio_runs
-    # Use randomized executable names and a fresh seed for each comparison.
-    # Output checksums bind accepted timings to matching computed results.
-    seed = int.from_bytes(os.urandom(4), "big")
+    seed = benchmarks.draw_seed()
+    target = task.perf_ratio_target or config.perf_ratio_target
+    info = {
+        "policy": benchmarks.POLICY,
+        "seed": f"{seed:016x}",
+        "seed_bits": benchmarks.SEED_BITS,
+        "requested_pairs": runs,
+        "pairs": 0,
+        "target": target,
+        "out_fnv_verified": False,
+        "measurements": [],
+    }
+    trace.info["perf_ratio"] = info
     tag = uuid.uuid4().hex[:10]
     switch_student = switch_reference = ""
     student_env = reference_env = ""
@@ -390,84 +406,81 @@ async def perf_paired(
         # implementation before each process so student and reference measurements
         # remain distinct; copying the launcher alone would make both import whichever
         # source was installed last.
-        switch_student = f"cp -f /app/{sf} ./{sf}; "
-        switch_reference = f"cp -f ./{ref.name} ./{sf}; "
+        switch_student = f"cp -f /app/{sf} ./{sf} && "
+        switch_reference = f"cp -f ./{ref.name} ./{sf} && "
         student_env = "PYTHONPYCACHEPREFIX=/tmp/pmpp-pycache-student "
         reference_env = "PYTHONPYCACHEPREFIX=/tmp/pmpp-pycache-reference "
-    script = (
-        f'cd /app/.grader && cp -f /app/{sf} ./{sf} && NV="$(cat .nvccflags)" && '
-        f'timeout -k 5 900 make {task.bench_target} PY=python3 NVCCFLAGS="$NV" >/tmp/pb.log 2>&1 '
-        f"|| {{ echo PB_STU_BUILD_FAIL; tail -5 /tmp/pb.log; exit 0; }}; "
-        f'timeout -k 5 900 make bench_reference PY=python3 NVCCFLAGS="$NV" >>/tmp/pb.log 2>&1 '
-        f"|| {{ echo PB_REF_BUILD_FAIL; tail -5 /tmp/pb.log; exit 0; }}; "
-        f"cp -f ./{task.bench_target} ./s_{tag} && cp -f ./bench_reference ./r_{tag}; "
-        f"for i in $(seq 1 {runs}); do "
-        f"{switch_student}"
-        f"so=$({student_env}PMPP_BENCH_SEED={seed} timeout -k 5 420 ./s_{tag} 2>&1); "
-        f'echo "STU $(echo "$so" | grep -oE \'avg_ms=[0-9.]+\' | head -1)"; '
-        f'echo "STUF $(echo "$so" | grep -oE \'out_fnv=[0-9a-fA-Fx]+\' | head -1)"; '
-        f"{switch_reference}"
-        f"ro=$({reference_env}PMPP_BENCH_SEED={seed} timeout -k 5 420 ./r_{tag} 2>&1); "
-        f'echo "REF $(echo "$ro" | grep -oE \'avg_ms=[0-9.]+\' | head -1)"; '
-        f'echo "REFF $(echo "$ro" | grep -oE \'out_fnv=[0-9a-fA-Fx]+\' | head -1)"; done'
-    )
-    res = await runtime.run(["bash", "-lc", script], env or {})
-    out = res.stdout + res.stderr
-    if "PB_REF_BUILD_FAIL" in out:
-        raise ScoreInfraError(
-            f"bench_reference failed to BUILD in the scoring sandbox — "
-            f"env fault, not a student perf fail: {out.strip()[-300:]}"
+    info["builds"] = {}
+    for side, target_name, executable in (
+        ("student", task.bench_target, f"s_{tag}"),
+        ("reference", "bench_reference", f"r_{tag}"),
+    ):
+        script = (
+            f'cd /app/.grader && cp -f /app/{sf} ./{sf} && NV="$(cat .nvccflags)" && '
+            f'timeout -k 5 900 make {target_name} PY=python3 NVCCFLAGS="$NV" '
+            f"&& cp -f ./{target_name} ./{executable}"
         )
-    stu = [float(x) for x in re.findall(r"STU avg_ms=([0-9.]+)", out)]
-    rfs = [float(x) for x in re.findall(r"REF avg_ms=([0-9.]+)", out)]
-    stu_fnv = re.findall(r"STUF out_fnv=([0-9a-fA-Fx]+)", out)
-    ref_fnv = re.findall(r"REFF out_fnv=([0-9a-fA-Fx]+)", out)
-    n = min(len(stu), len(rfs))
-    if n == 0:
-        if stu and not rfs:
-            raise ScoreInfraError(
-                f"bench_reference produced no timing in the scoring sandbox "
-                f"— env fault, not a student perf fail: {out.strip()[-300:]}"
+        result = await runtime.run(["bash", "-lc", script], env or {})
+        log = result.stdout + result.stderr
+        info["builds"][side] = {"exit_code": result.exit_code, "log_tail": log[-16000:]}
+        if result.exit_code != 0:
+            info["failure"] = f"{side} benchmark build failed"
+            if side == "reference":
+                raise ScoreInfraError(
+                    f"bench_reference build failed for {task.task_id}: {log[-300:]}"
+                )
+            return False
+
+    stu, rfs, ratios = [], [], []
+    for pair in range(runs):
+        samples = {"pair": pair + 1}
+        info["measurements"].append(samples)
+        for side, switch, py_env, executable in (
+            ("student", switch_student, student_env, f"s_{tag}"),
+            ("reference", switch_reference, reference_env, f"r_{tag}"),
+        ):
+            result = await runtime.run(
+                [
+                    "bash",
+                    "-lc",
+                    f"cd /app/.grader && {switch}{py_env}PMPP_BENCH_SEED={seed} "
+                    f"timeout -k 5 420 ./{executable}",
+                ],
+                env or {},
             )
-        trace.info["perf_ratio"] = f"paired bench failed; {out.strip()[-300:]}"
-        return False
-    # Require matching checksums from the student and reference timing runs.
-    # A missing reference checksum indicates an incomplete benchmark setup.
-    ref_has_fnv = len(ref_fnv) >= n
-    out_fnv_verified = None
-    if ref_has_fnv:
-        out_fnv_verified = len(stu_fnv) >= n and all(
-            s.lower() == r.lower()
-            for s, r in zip(stu_fnv[:n], ref_fnv[:n], strict=True)
-        )
-    else:
-        raise ScoreInfraError(
-            f"bench_reference emits no out_fnv — release69 requires every "
-            f"perf bench to be output-verified: {task.task_id}"
-        )
-    if out_fnv_verified is False:
-        trace.info["perf_ratio"] = {
-            "out_fnv_mismatch": True,
-            "student_fnv": stu_fnv[:n],
-            "reference_fnv": ref_fnv[:n],
-            "note": "timed kernel did not reproduce the graded outputs — no-op/shape-detect hack",
-        }
-        return False
-    ratios = [s / r for s, r in zip(stu[:n], rfs[:n], strict=True)]
-    med = statistics.median(sorted(ratios))
-    trace.info["perf_ratio"] = {
-        "median_ratio": round(med, 4),
-        "target": task.perf_ratio_target or config.perf_ratio_target,
-        "student_ms": round(statistics.median(stu[:n]), 4),
-        "reference_ms": round(statistics.median(rfs[:n]), 4),
-        "pairs": n,
-        # Retain the samples behind the median for performance-gate calibration.
-        "ratios": [round(x, 4) for x in ratios],
-        "student_ms_runs": [round(x, 4) for x in stu[:n]],
-        "reference_ms_runs": [round(x, 4) for x in rfs[:n]],
-        "out_fnv_verified": out_fnv_verified,  # True when checksums were present and matched.
-    }
-    return med <= (task.perf_ratio_target or config.perf_ratio_target)
+            samples[side] = benchmarks.measurement(
+                result.exit_code, result.stdout + result.stderr
+            )
+        student, reference = samples["student"], samples["reference"]
+        if "error" in reference:
+            info["failure"] = f"reference pair {pair + 1}: {reference['error']}"
+            raise ScoreInfraError(
+                f"{task.task_id}: {info['failure']}: {reference['log_tail'][-300:]}"
+            )
+        if "error" in student:
+            info["failure"] = f"student pair {pair + 1}: {student['error']}"
+            return False
+        if student["out_fnv"] != reference["out_fnv"]:
+            info.update(
+                failure=f"output digest mismatch in pair {pair + 1}",
+                out_fnv_mismatch=True,
+            )
+            return False
+        stu.append(student["avg_ms"])
+        rfs.append(reference["avg_ms"])
+        ratios.append(stu[-1] / rfs[-1])
+        info["pairs"] = len(ratios)
+    med = statistics.median(ratios)
+    info.update(
+        median_ratio=med,
+        student_ms=statistics.median(stu),
+        reference_ms=statistics.median(rfs),
+        ratios=ratios,
+        student_ms_runs=stu,
+        reference_ms_runs=rfs,
+        out_fnv_verified=True,
+    )
+    return med <= target
 
 
 async def _capture_grader_logs(runtime, trace) -> None:

@@ -4,7 +4,9 @@ import dataclasses
 from typing import Literal
 
 import verifiers.v1 as vf
+from pydantic import Field
 
+from pmpp_hard import benchmarks
 from pmpp_hard.grader_inputs import POLICY, RANDOMIZED_TASKS
 
 GATE_PERF = {"perf", "insight"}  # gate types that require performance scoring
@@ -65,7 +67,7 @@ class PMPPHardConfig(vf.TasksetConfig, vf.TaskConfig):
     perf_ratio_target: float = (
         1.25  # maximum accepted median student-to-reference timing ratio
     )
-    perf_ratio_runs: int = 5  # number of interleaved timing pairs
+    perf_ratio_runs: int = Field(default=5, ge=1)  # complete interleaved timing pairs
     gpu_lock: bool = True  # serialize scoring runs that share a GPU
     # Remind the agent to write its best available solution to the submission file.
     always_submit: bool = True
@@ -93,8 +95,11 @@ class PMPPHardConfig(vf.TasksetConfig, vf.TaskConfig):
         1  # minimum kernel launches observed during the probed run
     )
     residency_gpu_frac: float = (
-        0.02  # minimum GPU-time ratio on the same input; zero disables the floor
+        0.02  # suspicious GPU-time ratio on the same input; zero skips the baseline
     )
+    # Time alone cannot distinguish an optimized GPU algorithm from a decoy.
+    # Retain the old rejection policy only as an explicitly selected legacy lever.
+    residency_time_mode: Literal["diagnostic", "enforce"] = "diagnostic"
     # Reject captured source that accesses reference implementations or alters probes.
     source_policy: bool = True
     # Require a Triton JIT kernel to be launched and observed at runtime.
@@ -139,6 +144,13 @@ class LeverVector:
     kernelguard_check: bool = True
     correctness_inputs: str = POLICY
     n_randomized_correctness: int = 0
+    benchmark_inputs: str = benchmarks.POLICY
+    benchmark_seed_bits: int = benchmarks.SEED_BITS
+    perf_ratio_runs: int = 5
+    residency_policy: str = "runtime-kernels-v2"
+    residency_time_mode: str = "diagnostic"
+    residency_gpu_frac: float = 0.02
+    residency_min_launches: int = 1
 
     @classmethod
     def compute(
@@ -174,6 +186,10 @@ class LeverVector:
             triton_premise=config.triton_premise,
             kernelguard_check=config.kernelguard_check,
             n_randomized_correctness=sum(t.task_id in RANDOMIZED_TASKS for t in tasks),
+            perf_ratio_runs=config.perf_ratio_runs,
+            residency_time_mode=config.residency_time_mode,
+            residency_gpu_frac=config.residency_gpu_frac,
+            residency_min_launches=config.residency_min_launches,
         )
 
     def header_lines(self) -> list[str]:
@@ -190,6 +206,10 @@ class LeverVector:
             f"{self.n_perf_gated} perf-gated, {self.n_hidden_shape} hidden-shape",
             f"PMPP correctness: {self.correctness_inputs} "
             f"randomized={self.n_randomized_correctness}/{self.n_tasks}",
+            f"PMPP benchmarks: {self.benchmark_inputs} seed_bits={self.benchmark_seed_bits} "
+            f"required_pairs={self.perf_ratio_runs}",
+            f"PMPP residency: {self.residency_policy} time_mode={self.residency_time_mode} "
+            f"gpu_frac={self.residency_gpu_frac} min_launches={self.residency_min_launches}",
         ]
 
     def as_json(self) -> dict:

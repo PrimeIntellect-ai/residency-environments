@@ -3,7 +3,8 @@
 Correctness-only tasks may expose oracle headers required by their tests. Static
 checks prevent direct dependencies on grader implementations and control inputs.
 A CUPTI activity shim independently records executed GPU kernels in the scoring
-sandbox, with an optional GPU-time floor derived from the reference solution.
+sandbox, with a reference-relative GPU-time diagnostic. An explicit legacy option
+can enforce the time floor, but fast device algorithms can fall below it honestly.
 
 The source policy covers oracle headers and symbols, grader translation units,
 the Python reference module, and access to residency or benchmark controls.
@@ -193,7 +194,6 @@ def static_policy_violation(task: PMPPHardTaskData, kernel: bytes) -> str | None
 # Static Triton requirements.
 
 _JIT_LINE_RE = re.compile(r"^\s*@\s*(?:triton\.)?jit\b")
-_GRID_LAUNCH_RE = re.compile(r"\w\s*\[[^\]\n]+\]\s*\(")
 _DEF_RE = re.compile(r"\s*def\s+(\w+)\s*\(")
 
 
@@ -215,12 +215,14 @@ def jit_kernel_names(src: str) -> set[str]:
 
 
 def triton_static_violation(kernel: bytes) -> str | None:
-    """Return a violation when Triton source lacks a JIT kernel or grid launch."""
+    """Require a JIT definition; establish execution with the runtime probe.
+
+    Compiled/cached launchers need not use the immediate ``kernel[grid](...)``
+    spelling. A source regex cannot establish whether a launch actually executes.
+    """
     src = kernel.decode("utf-8", "replace")
     if not jit_kernel_names(src):
         return "no @triton.jit kernel defined"
-    if not _GRID_LAUNCH_RE.search(src):
-        return "no kernel[grid](...) launch"
     return None
 
 
@@ -299,12 +301,22 @@ async def _reference_baseline(
         f"rm -f {REF_OUT} && "
         f"LD_PRELOAD={SHIM_SO} PMPP_RESIDENCY_OUT={REF_OUT} "
         f"timeout -k 5 420 ./{task.test_target.replace('student', 'reference')} "
-        f">/tmp/resref.log 2>&1; cat {REF_OUT} 2>/dev/null"
+        f">/tmp/resref.log 2>&1; rc=$?; cat {REF_OUT} 2>/dev/null; exit $rc"
     )
     res = await runtime.run(["bash", "-lc", script], {})
     rep = parse_report(res.stdout + res.stderr)
-    if rep.lines == 0 or rep.kernels == 0:
+    if (
+        res.exit_code != 0
+        or rep.lines == 0
+        or rep.kernels == 0
+        or rep.cupti_errors
+        or rep.parse_errors
+    ):
         info["gpu_floor"] = "skipped: reference baseline unavailable (build/run failed)"
+        if config.residency_time_mode == "enforce":
+            raise ScoreInfraError(
+                f"{task.task_id}: reference GPU-time baseline unavailable"
+            )
         return None
     return rep
 
@@ -344,7 +356,11 @@ async def enforce(
             "memcpy": rep.memcpy,
             "report_lines": rep.lines,
             "cupti_errors": rep.cupti_errors,
-            "kernel_names": sorted(rep.names)[:16],
+            "parse_errors": rep.parse_errors,
+            "kernel_names": sorted(rep.names),
+            "policy": "runtime-kernels-v2",
+            "time_mode": config.residency_time_mode,
+            "gpu_frac": config.residency_gpu_frac,
         }
     )
     if rep.lines == 0:
@@ -352,34 +368,40 @@ async def enforce(
             f"residency probe produced no report for {task.task_id} — LD_PRELOAD/CUPTI "
             f"env fault (shim never ran), not a student fail"
         )
+    if rep.parse_errors or rep.cupti_errors:
+        raise ScoreInfraError(
+            f"residency probe ambiguous for {task.task_id}: "
+            f"parse_errors={rep.parse_errors}, cupti_errors={rep.cupti_errors}"
+        )
     fail = None
     if rep.kernels < config.residency_min_launches:
-        if rep.cupti_errors:
-            raise ScoreInfraError(
-                f"residency probe ambiguous for {task.task_id}: CUPTI init failed in "
-                f"{rep.cupti_errors} process(es) and zero kernels recorded — env fault"
-            )
         fail = (
             f"no GPU kernel execution recorded "
             f"(kernels={rep.kernels} < min {config.residency_min_launches})"
         )
     if fail is None and config.triton_premise and task.student_file.endswith(".py"):
         jn = jit_kernel_names(kernel.decode("utf-8", "replace"))
-        if not jn or not _match_jit_names(jn, rep.names):
+        executed = sorted(j for j in jn if _match_jit_names({j}, rep.names))
+        if not executed:
             fail = "no @triton.jit-defined kernel executed on the GPU (torch-only solution)"
         info["jit_names"] = sorted(jn)
+        info["executed_jit_names"] = executed
     if fail is None and config.residency_gpu_frac > 0:
         ref = await _reference_baseline(config, task, runtime, tree, info)
         if ref is not None:
             floor = config.residency_gpu_frac * ref.gpu_ns
             info["reference_gpu_ns"] = ref.gpu_ns
             info["gpu_floor_ns"] = int(floor)
+            info["below_gpu_time_floor"] = rep.gpu_ns < floor
             if rep.gpu_ns < floor:
-                fail = (
+                warning = (
                     f"GPU-time floor: student {rep.gpu_ns}ns < "
                     f"{config.residency_gpu_frac} x reference {ref.gpu_ns}ns "
-                    f"(decoy-kernel host compute?)"
+                    f"(review execution attribution; timing alone is not proof of host compute)"
                 )
+                info["time_warning"] = warning
+                if config.residency_time_mode == "enforce":
+                    fail = warning
     marker = (
         markers.M_RESIDENCY_PASS
         if fail is None

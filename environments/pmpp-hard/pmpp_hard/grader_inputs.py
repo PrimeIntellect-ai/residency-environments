@@ -3,11 +3,13 @@
 import re
 import secrets
 
+from pmpp_hard import scenario_inputs
 from pmpp_hard.errors import PoolIntegrityError
 
-POLICY = "independent-correctness-inputs-v1"
+POLICY = "independent-correctness-inputs-v2"
 
 # Each entry binds the transformation to the validated release grader layout.
+# Task 44 explicitly covers flush/compaction edges; task 67 varies payloads only.
 CUDA_PARAMETERS = {
     "v2-pl-01-route_compact_reduce": 1,
     "v2-pl-02-moe_dispatch_combine": 1,
@@ -16,6 +18,7 @@ CUDA_PARAMETERS = {
     "v2-pl-06-spec_decode_verify_rollback": 1,
     "v2-pl-08-group_limited_topk": 1,
     "v2-pl-12-segmented_sort_topm": 1,
+    "v2-pl-13-fused_gemm_nvfp4_epilogue": 1,
     "v2-pl-16-multi_checkpoint_tree_rollback": 1,
     "v2-pl-22-paged_ring_hybrid_evict": 1,
     "v2-pl-23-fused_layernorm_quant_pipeline": 1,
@@ -24,15 +27,21 @@ CUDA_PARAMETERS = {
     "v2-pl-27-streaming_dedup_window": 1,
     "v2-pl-32-streaming_merge_topk_quantile": 1,
     "v2-pl-34-fused_csr_spmm_topk": 1,
+    "v2-pl-37-deterministic_mergeable_quantile_sketch": 1,
     "v2-pl-40-switch_moe_overflow_router": 1,
     "v2-pl-41-work_stealing_runtime": 1,
     "v2-pl-42-buddy_allocator_cleaner": 1,
+    "v2-pl-44-lsm_wal_compaction": 1,
+    "v2-pl-45-chunked_prefill_scheduler": 1,
     "v2-pl-47-cuckoo_tombstone_table": 2,
+    "v2-pl-51-mesi_directory": 1,
     "v2-pl-54-stm_commit_arbiter": 1,
     "v2-pl-55-lock_manager_deadlock": 1,
     "v2-pl-56-consistent_hash_ring": 1,
     "v2-pl-60-mk_paged_interpreter": 1,
+    "v2-pl-63-mk_event_tensor_runtime": 1,
     "v2-pl-65-mk_warp_pipeline_mbarrier": 1,
+    "v2-pl-66-mk_schedule_planner": 1,
     "v2-pl-69-mk_instr_decoder_hazard": 1,
     "v2-pl-80-paged_sink_e4m3_decode": 2,
     "v2-pl-81-mla_latent_absorb_decode": 2,
@@ -59,7 +68,7 @@ TRITON_TASKS = frozenset(
         "v2-pl-33-triton_fused_layernorm_quant",
     }
 )
-RANDOMIZED_TASKS = CUDA_PARAMETERS.keys() | TRITON_TASKS
+RANDOMIZED_TASKS = CUDA_PARAMETERS.keys() | TRITON_TASKS | scenario_inputs.TASKS
 _CUDA_CONSTANT = b"0x9e3779b97f4a7c15"
 _TORCH_SEED = b"g.manual_seed(SEED + seed_offset)"
 
@@ -83,6 +92,18 @@ def render(task_id: str, source: bytes, parameter: int) -> bytes:
     """
     if not 0 < parameter < 1 << 64 or parameter % 2 == 0:
         raise ValueError("correctness input parameter must be an odd uint64")
+    if task_id in scenario_inputs.TASKS:
+        return scenario_inputs.render(task_id, source, parameter)
+    if task_id == "v2-pl-44-lsm_wal_compaction":
+        source = scenario_inputs.replace_once(
+            task_id,
+            source,
+            b"op_compact(2, 1), op_compact(0, 0), op_compact(-1, 1), op_flush(), op_compact(0, 1),",
+            b"op_compact(0, 1), op_compact(2, 1), op_compact(0, 0), op_compact(-1, 1), op_flush(), op_flush(), op_compact(0, 1),\n"
+            b"        op_put(100, 1), op_flush(), op_put(101, 2), op_flush(),\n"
+            b"        op_put(102, 3), op_flush(), op_put(103, 4), op_flush(),\n"
+            b"        op_put(104, 5), op_flush(),",
+        )
     if task_id in CUDA_PARAMETERS:
         expected = CUDA_PARAMETERS[task_id]
         if source.count(_CUDA_CONSTANT) == expected:

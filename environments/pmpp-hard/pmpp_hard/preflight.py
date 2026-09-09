@@ -15,7 +15,7 @@ import shutil
 import subprocess
 from typing import Callable, Literal
 
-from pmpp_hard import grader_inputs, markers
+from pmpp_hard import benchmarks, grader_inputs, markers
 from pmpp_hard.config import LeverVector, PMPPHardConfig, PMPPHardTaskData
 from pmpp_hard.errors import PoolIntegrityError
 from pmpp_hard.paths import REF_NAMES, DataTree
@@ -299,6 +299,48 @@ def check_paired_ref_exists(ctx: PreflightContext) -> list[Finding]:
                     t.task_id,
                     f"{t.task_id}: data/reference copy differs from bundle "
                     f"reference — stale sync",
+                )
+            )
+    return out
+
+
+def check_benchmark_seed_path(ctx: PreflightContext) -> list[Finding]:
+    """Catch missing seed hooks or changed overflow anchors before a rollout."""
+    out = []
+    for t in _per_task(ctx):
+        if not perf_enabled(ctx.config, t):
+            continue
+        bundle = ctx.tree.bundle(t.task_id)
+        sources = [p for p in bundle.glob("bench_*") if p.suffix in (".py", ".cu")]
+        error = None
+        if len(sources) != 1:
+            error = "expected exactly one performance benchmark source"
+        elif sources[0].suffix == ".py":
+            content = sources[0].read_bytes()
+            if b'os.environ.get("PMPP_BENCH_SEED"' not in content:
+                error = "missing Triton benchmark seed consumer"
+            else:
+                try:
+                    benchmarks.prepare_source(t.task_id, content)
+                except ValueError as exc:
+                    error = str(exc)
+        else:
+            header = bundle / "pmpp_bench_digest.cuh"
+            if (
+                b"pmpp::bench_seed(" not in sources[0].read_bytes()
+                or not header.is_file()
+                or b'getenv("PMPP_BENCH_SEED")' not in header.read_bytes()
+            ):
+                error = "missing CUDA/CUTLASS benchmark seed consumer"
+            else:
+                try:
+                    benchmarks.prepare_source(t.task_id, sources[0].read_bytes())
+                except ValueError as exc:
+                    error = str(exc)
+        if error:
+            out.append(
+                Finding(
+                    "benchmark_seed_path", "ERROR", t.task_id, f"{t.task_id}: {error}"
                 )
             )
     return out
@@ -1026,6 +1068,7 @@ ALL_CHECKS: tuple[tuple[str, Callable], ...] = (
     ("stub_leak", check_stub_leak),
     ("canary_integrity", check_canary_integrity),
     ("paired_bench_format", check_paired_bench_format),
+    ("benchmark_seed_path", check_benchmark_seed_path),
     ("paired_ref_exists", check_paired_ref_exists),
     ("makefile_targets", check_makefile_targets),
     ("bench_target_consistency", check_bench_target_consistency),
