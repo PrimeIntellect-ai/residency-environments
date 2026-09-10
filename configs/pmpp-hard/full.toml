@@ -1,0 +1,51 @@
+num_tasks = 69
+num_rollouts = 1
+max_concurrent = 1
+push = false
+
+[env.taskset]
+id = "pmpp-hard"
+arch = "sm_120"
+require_perf = true
+held_out = true
+score_runtime_type = "docker"
+score_gpu = "1"
+score_cpu = 8.0
+score_memory = 32.0
+perf_ratio_target = 1.25
+perf_ratio_runs = 5
+gpu_lock = true
+always_submit = true
+single_shot = false
+expected_perf_gated = 48
+residency_check = true
+source_policy = true
+triton_premise = true
+kernelguard_check = true
+
+[env.taskset.agent_images]
+cuda = "pmpp-cuda-agent:cu128"
+triton = "pmpp-triton:cu128"
+cutlass = "pmpp-cutlass:12.8.1"
+
+[env.taskset.score_images]
+cuda = "pmpp-cuda-agent:cu128"
+triton = "pmpp-triton:cu128"
+cutlass = "pmpp-cutlass:12.8.1"
+
+[env.agent.harness]
+id = "bash"
+
+[env.agent.runtime]
+type = "docker"
+image = "pmpp-cuda-agent:cu128"
+workdir = "/app"
+gpu = "1"
+cpu = 4.0
+memory = 8.0
+
+[env.agent.timeout]
+setup = 1200.0
+rollout = 1500.0
+finalize = 120.0
+scoring = 1800.0

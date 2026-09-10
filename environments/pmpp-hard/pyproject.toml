@@ -1,0 +1,39 @@
+[project]
+name = "pmpp-hard"
+version = "0.1.1"
+description = "A 69-task GPU-kernel environment with isolated correctness and performance scoring."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "kernelguard==0.3.2",
+  "verifiers>=0.3.0",
+]
+authors = [{ name = "Sinatras", email = "SinatrasC@users.noreply.github.com" }]
+license = { file = "pmpp_hard/LICENSE" }
+classifiers = ["License :: OSI Approved :: MIT License"]
+
+[project.urls]
+Homepage = "https://github.com/SinatrasC/pmpp-hard"
+Repository = "https://github.com/SinatrasC/pmpp-hard"
+Issues = "https://github.com/SinatrasC/pmpp-hard/issues"
+
+[project.optional-dependencies]
+modal = ["verifiers[modal]>=0.3.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pmpp_hard"]
+
+[tool.verifiers.eval]
+num_examples = 69
+rollouts_per_example = 1
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["pmpp_hard/data"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]

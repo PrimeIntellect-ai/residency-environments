@@ -1,0 +1,15 @@
+NVCCFLAGS ?= -O3 -std=c++17 -arch=sm_120
+PY ?= python3
+.PHONY: test_student bench_student test_reference bench_reference test_naive bench_naive
+test_student:
+	nvcc $(NVCCFLAGS) test_mk_priority_preempt.cu solution.cu -o test_student
+bench_student:
+	nvcc $(NVCCFLAGS) bench_mk_priority_preempt.cu solution.cu -o bench_student
+test_reference:
+	nvcc $(NVCCFLAGS) test_mk_priority_preempt.cu reference_solution.cu -o test_reference
+bench_reference:
+	nvcc $(NVCCFLAGS) bench_mk_priority_preempt.cu reference_solution.cu -o bench_reference
+test_naive:
+	nvcc $(NVCCFLAGS) test_mk_priority_preempt.cu naive_ref.cu -o test_naive
+bench_naive:
+	nvcc $(NVCCFLAGS) bench_mk_priority_preempt.cu naive_ref.cu -o bench_naive
