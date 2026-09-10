@@ -1,0 +1,33 @@
+num_tasks = 12
+num_rollouts = 2
+max_concurrent = 2
+push = false
+
+[env.taskset]
+id = "carla-env"
+modality = "text"
+
+[env.taskset.task.tools]
+colocated = false
+
+[env.taskset.task.tools.runtime]
+type = "prime"
+image = "sinatras/carla-env-runtime@sha256:27c83197e7698efbc0f8021f8f6ca53d9346e389326f2fb26c7ad3b354880d81"
+workdir = "/home/carla"
+vm = false
+region = "us"
+cpu = 4
+memory = 8
+disk = 40
+
+[env.agent.harness]
+id = "null"
+
+[env.agent.runtime]
+type = "prime"
+vm = true
+
+[env.agent.timeout]
+setup = 600
+rollout = 600
+finalize = 120

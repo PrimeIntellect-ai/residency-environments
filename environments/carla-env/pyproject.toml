@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "carla-env"
+version = "0.3.0"
+description = "CARLA 0.10.0 text and vision driving taskset for Verifiers"
+readme = "README.md"
+authors = [{ name = "Sinatras" }]
+license = "MIT"
+license-files = ["LICENSE"]
+tags = ["agentic", "tool-use", "multi-turn", "robotics", "rl", "eval", "benchmark"]
+keywords = ["agentic", "tool-use", "multi-turn", "robotics", "rl", "eval", "benchmark"]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "verifiers>=0.3.0",
+]
+
+[project.optional-dependencies]
+runtime = [
+  "carla-ue5-api==0.10.0",
+  "imageio>=2.34.0",
+  "imageio-ffmpeg>=0.5.1",
+  "numpy>=1.26.0",
+  "Pillow>=10.0.0",
+  "networkx>=3.0",
+  "shapely>=2.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["carla_env"]
+include = [
+  "carla_env/data/*.json",
+  "carla_env/_carla_agents/LICENSE",
+]
+
+[tool.verifiers.eval]
+num_examples = 12
+rollouts_per_example = 2
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+  # Vendored CARLA code; not linted as part of this project.
+  "carla_env/_carla_agents",
+  "third_party",
+]
+
+[tool.ruff.lint]
+select = ["F", "I"]
