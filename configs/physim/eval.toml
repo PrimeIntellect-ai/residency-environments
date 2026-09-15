@@ -1,0 +1,50 @@
+# Set the model and a local bundle path before running eval.
+# There is no default world or automatic selection of eval-ready registry entries.
+# Pass --env.taskset.task.tools.bundle /path/to/bundle, or set bundle below.
+# This configuration makes model API calls when executed.
+model = "YOUR_MODEL_ID"
+num_tasks = 1
+num_rollouts = 1
+max_concurrent = 1
+push = false
+
+[env.taskset]
+id = "physim"
+
+[env.taskset.task]
+output_root = "outputs/r6/artifacts"
+agent_image = "physim-agent:0.12.2"
+
+[env.taskset.task.tools]
+# bundle = "/path/to/bundle" # Required: select one prepared world explicitly.
+max_experiments = 1000
+max_total_tu = 50000
+max_validation_attempts = 128
+max_submission_attempts = 128
+
+[env.agent]
+# Generous exploration defaults; increase these together for longer investigations.
+max_turns = 1024
+max_output_tokens = 1048576
+
+[env.agent.timeout]
+rollout = 86400
+
+[env.agent.harness]
+id = "bash"
+edit = true
+search = false
+
+[env.agent.runtime]
+type = "docker"
+image = "physim-agent:0.12.2"
+workdir = "/workspace"
+cpu = 4
+memory = 8
+allow = []
+
+[env.agent.retries]
+max_retries = 0
+
+[env.retries]
+max_retries = 0

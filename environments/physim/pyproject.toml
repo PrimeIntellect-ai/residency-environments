@@ -1,0 +1,46 @@
+[project]
+name = "physim"
+version = "0.12.2"
+description = "A Verifiers v1 taskset for experimental prediction in prepared physical worlds"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["blobkit @ https://github.com/swpo/physim/releases/download/blobkit-v0.3.5/blobkit-0.3.5-py3-none-any.whl#sha256=6747e7ebe26e3909c05d91d050ebce93715d08992c51498cbf480b8206224331", "verifiers>=0.3.1,<0.4", "numpy>=1.26,<3", "scipy>=1.11,<2"]
+
+[project.optional-dependencies]
+agent = [] # Compatibility with the previous local installation command.
+hub = ["huggingface-hub>=1.0,<2"]
+reference = ["numpy==2.5.2", "scipy==1.18.0"]
+
+[project.scripts]
+physim = "physim.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["physim", "physim_r6", "physim_r6_scaling"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.sdist]
+include = ["physim", "physim_r6", "physim_r6_scaling", "pyproject.toml", "README.md", "LICENSE", "DATA_SOURCES.md"]
+
+[tool.hatch.build]
+exclude = ["physim/blobdata"]
+
+[tool.verifiers.eval]
+num_examples = 1
+rollouts_per_example = 1
+
+[tool.ruff]
+line-length = 120
+# These four reference files are byte-bound by scientific manifests.
+extend-exclude = ["physim/blobround6.py", "physim/blobround6_eval.py", "physim/blobround6_explore.py", "physim/devices.py", "physim/blobdata"]
+
+[tool.ruff.lint]
+select = ["F", "I"]
+ignore = ["F722", "F821"]
