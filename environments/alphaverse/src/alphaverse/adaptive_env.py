@@ -10,6 +10,7 @@ import verifiers.v1 as vf
 from pydantic import Field
 
 from alphaverse.artifact_egress import call_framework, call_mcp_tool
+from alphaverse.env import finalize_interaction
 from alphaverse.opponent_roster import (
     OpponentRoster,
     legacy_prop_roster_id,
@@ -324,7 +325,8 @@ class AlphaverseAdaptiveEnv(vf.Env[AlphaverseAdaptiveEnvConfig]):
             )
             open_segments = 1
 
-        if prop is not None and isinstance(player.trace.state.terminal_summary, dict):
+        await finalize_interaction(player)
+        if prop is not None:
             prop_summary = await self._framework_call(
                 player,
                 {

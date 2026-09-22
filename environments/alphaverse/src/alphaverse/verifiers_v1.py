@@ -196,9 +196,6 @@ class AlphaverseTaskConfig(vf.TaskConfig):
     initial_margin_per_contract: int = Field(default=5_000, gt=0)
     maintenance_margin_per_contract: int = Field(default=4_000, gt=0)
     margin_liquidation_grace_ns: int = Field(default=30_000_000_000, ge=0)
-    reward_scale: float = Field(default=10_000.0, gt=0)
-    reward_clip: float = Field(default=10.0, gt=0)
-    incomplete_liquidation_penalty: float = Field(default=1.0, ge=0)
     adaptive_prop: bool = False
     prop_seed_profile: Literal["passive", "competitive"] = "passive"
     prop_control_scope: Literal["full_source", "knobs"] = "full_source"
@@ -579,6 +576,9 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         operation = payload.get("operation")
         export_token = self.state.artifact_export_token
         if export_token and secrets.compare_digest(capability, export_token):
+            if operation == "finalize_episode":
+                with self._market_operation() as runtime:
+                    return runtime.terminate()
             if operation == "release_trading_runtimes":
                 if self._runtime is not None:
                     self._runtime.close()
@@ -791,21 +791,13 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
             trace.state.artifact_export_token = None
             trace.state.coordination_token = None
         else:
-            trace.info["alphaverse"] = {
-                "termination_state": "incomplete",
-                "position": 0,
-                "pnl": 0,
-                "artifact_error": ("episode ended before terminate_session or the market horizon"),
-            }
+            raise RuntimeError("episode was not liquidated before Toolset teardown")
 
     @vf.stop
     async def session_terminated(self, trace: vf.Trace) -> bool:
         if trace.state.infrastructure_error:
             return True
-        # A terminal market is not enough to tear down a task-scoped Toolset.
-        # Its terminal tool response must first reach the harness, and the
-        # harness must finish any artifact stream while the server is alive.
-        return bool(isinstance(trace.state.terminal_summary, dict) and trace.state.artifact_egress_complete)
+        return isinstance(trace.state.terminal_summary, dict)
 
     @staticmethod
     def _number(summary: dict[str, Any], key: str) -> float:
@@ -833,18 +825,14 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
 
     @vf.reward(weight=1.0)
     async def realized_pnl(self, trace: vf.Trace) -> float:
-        """Normalized terminal realized PnL with explicit failure penalties."""
+        """Terminal realized PnL, in the market's cash units."""
 
         summary = trace.info.get("alphaverse", {})
         if not isinstance(summary, dict):
             raise TypeError("Alphaverse terminal summary must be an object")
-        if summary.get("termination_state") == "incomplete":
-            return -self.config.incomplete_liquidation_penalty
-        pnl = self._number(summary, "pnl")
-        score = pnl / self.config.reward_scale
         if self._liquidation_failed(summary):
-            score -= self.config.incomplete_liquidation_penalty
-        return max(-self.config.reward_clip, min(self.config.reward_clip, score))
+            raise RuntimeError("terminal liquidation did not flatten the account; realized PnL is unavailable")
+        return self._number(summary, "pnl")
 
     @vf.metric
     async def terminal_metrics(self, trace: vf.Trace) -> dict[str, float]:
@@ -867,66 +855,36 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
         reasoning_tokens = sum(usage.reasoning_tokens or 0 for usage in usages)
         reported_costs = [usage.cost for usage in usages if usage.cost is not None]
         observed_model_turns = trace.num_turns
-        metrics = (
-            {
-                "terminal_cash": float(self.data.starting_cash),
-                "terminal_pnl": 0.0,
-                "remaining_position": 0.0,
-                "max_abs_position": 0.0,
-                "max_drawdown": 0.0,
-                "gross_traded_quantity": 0.0,
-                "fill_count": 0.0,
-                "fees_paid": 0.0,
-                "order_count": 0.0,
-                "rejection_count": 0.0,
-                "order_rejection_count": 0.0,
-                "cancel_rejection_count": 0.0,
-                "margin_rejection_count": 0.0,
-                "margin_call_count": 0.0,
-                "margin_liquidation_count": 0.0,
-                "margin_liquidated_quantity": 0.0,
-                "strategy_fault_count": 0.0,
-                "deployment_count": 0.0,
-                "unique_strategy_version_count": 0.0,
-                "strategy_stop_count": 0.0,
-                "market_time_ns": float(trace.state.market_time_ns),
-                "voluntary_wait_ns": 0.0,
-                "charged_agent_time_ns": 0.0,
-                "model_turn_count": float(observed_model_turns),
-                "liquidation_failed": 1.0,
-            }
-            if summary.get("termination_state") == "incomplete"
-            else {
-                "terminal_cash": self._number(summary, "cash"),
-                "terminal_pnl": self._number(summary, "pnl"),
-                "remaining_position": self._number(summary, "position"),
-                "max_abs_position": self._number(summary, "max_abs_position"),
-                "max_drawdown": self._number(summary, "max_drawdown"),
-                "gross_traded_quantity": self._number(summary, "gross_filled_quantity"),
-                "fill_count": self._number(summary, "fill_count"),
-                "fees_paid": self._number(summary, "fees_paid"),
-                "order_count": self._number(summary, "order_count"),
-                "rejection_count": self._number(summary, "rejection_count"),
-                "order_rejection_count": self._number(summary, "order_rejection_count"),
-                "cancel_rejection_count": self._number(summary, "cancel_rejection_count"),
-                "margin_rejection_count": self._number(summary, "margin_rejection_count"),
-                "margin_call_count": self._number(summary, "margin_call_count"),
-                "margin_liquidation_count": self._number(summary, "margin_liquidation_count"),
-                "margin_liquidated_quantity": self._number(summary, "margin_liquidated_quantity"),
-                "strategy_fault_count": self._number(summary, "strategy_fault_count"),
-                "deployment_count": self._number(summary, "deployment_count"),
-                "unique_strategy_version_count": self._number(summary, "unique_strategy_version_count"),
-                "strategy_stop_count": self._number(summary, "strategy_stop_count"),
-                "market_time_ns": self._number(summary, "market_time"),
-                "voluntary_wait_ns": self._number(summary, "voluntary_wait_ns"),
-                "charged_agent_time_ns": self._number(summary, "charged_agent_time_ns"),
-                "model_turn_count": max(
-                    self._number(summary, "model_turn_count"),
-                    float(observed_model_turns),
-                ),
-                "liquidation_failed": float(self._liquidation_failed(summary)),
-            }
-        )
+        metrics = {
+            "terminal_cash": self._number(summary, "cash"),
+            "terminal_pnl": self._number(summary, "pnl"),
+            "remaining_position": self._number(summary, "position"),
+            "max_abs_position": self._number(summary, "max_abs_position"),
+            "max_drawdown": self._number(summary, "max_drawdown"),
+            "gross_traded_quantity": self._number(summary, "gross_filled_quantity"),
+            "fill_count": self._number(summary, "fill_count"),
+            "fees_paid": self._number(summary, "fees_paid"),
+            "order_count": self._number(summary, "order_count"),
+            "rejection_count": self._number(summary, "rejection_count"),
+            "order_rejection_count": self._number(summary, "order_rejection_count"),
+            "cancel_rejection_count": self._number(summary, "cancel_rejection_count"),
+            "margin_rejection_count": self._number(summary, "margin_rejection_count"),
+            "margin_call_count": self._number(summary, "margin_call_count"),
+            "margin_liquidation_count": self._number(summary, "margin_liquidation_count"),
+            "margin_liquidated_quantity": self._number(summary, "margin_liquidated_quantity"),
+            "strategy_fault_count": self._number(summary, "strategy_fault_count"),
+            "deployment_count": self._number(summary, "deployment_count"),
+            "unique_strategy_version_count": self._number(summary, "unique_strategy_version_count"),
+            "strategy_stop_count": self._number(summary, "strategy_stop_count"),
+            "market_time_ns": self._number(summary, "market_time"),
+            "voluntary_wait_ns": self._number(summary, "voluntary_wait_ns"),
+            "charged_agent_time_ns": self._number(summary, "charged_agent_time_ns"),
+            "model_turn_count": max(
+                self._number(summary, "model_turn_count"),
+                float(observed_model_turns),
+            ),
+            "liquidation_failed": float(self._liquidation_failed(summary)),
+        }
         metrics.update(
             {
                 "prompt_tokens": float(prompt_tokens),

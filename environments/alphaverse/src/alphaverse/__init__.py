@@ -2,10 +2,14 @@
 
 from alphaverse.public_types import Side
 
-__all__ = ["AlphaverseHarness", "AlphaverseTaskset", "Side"]
+__all__ = ["AlphaverseEnv", "AlphaverseHarness", "AlphaverseTaskset", "Side"]
 
 
 def __getattr__(name: str):
+    if name == "AlphaverseEnv":
+        from alphaverse.env import AlphaverseEnv
+
+        return AlphaverseEnv
     if name == "AlphaverseHarness":
         from alphaverse.eval_harness import AlphaverseHarness
 

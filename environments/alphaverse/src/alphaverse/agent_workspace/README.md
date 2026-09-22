@@ -21,7 +21,7 @@ not depend on external websites, package registries, repositories, or services.
 
 ## Objective and evaluation
 
-Your primary reward is terminal realized PnL:
+Your reward is terminal realized PnL, without scaling, clipping, or extra penalties:
 
 ```text
 terminal cash - starting cash
@@ -31,9 +31,9 @@ Ending the session cancels your live orders and aggressively liquidates any
 remaining position through ordinary book liquidity. Fees and liquidation
 slippage therefore count. You may flatten more carefully before terminating.
 
-A session that reaches its disclosed market-time horizon is finalized
-automatically. Ending the harness before explicit termination or that horizon is
-an incomplete rollout. Open positions or failed liquidation are penalized.
+A session that reaches its disclosed market-time horizon or whose harness ends
+is finalized the same way. Earlier trading gains and losses are retained;
+termination or forced liquidation does not add a separate reward penalty.
 
 ## Time
 

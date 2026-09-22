@@ -14,10 +14,13 @@ rollouts, and presentation assets are intentionally excluded.
 ## Objective
 
 The primary objective metric is terminal realized PnL after transaction fees
-and terminal liquidation. The scalar reward divides PnL by a configurable scale
-(10,000 by default), clips the result, and subtracts an explicit incomplete-
-liquidation penalty. Infrastructure failures invalidate a rollout rather than
-becoming trading losses. The exchange also records volume, fills,
+and terminal liquidation: reward equals terminal cash minus starting cash, in
+the original cash units. There is no scaling, clipping, or additional penalty.
+Explicit termination, the market horizon, and normal harness completion all
+cancel live orders and liquidate through the ordinary order book before scoring.
+Fees and liquidation slippage affect PnL naturally. Infrastructure failures or
+insufficient liquidity to flatten the account invalidate a rollout rather than
+inventing a trading result. The exchange also records volume, fills,
 orders, rejections, position, drawdown, margin events, strategy deployments,
 model usage, and inference cost as diagnostics.
 
@@ -53,8 +56,10 @@ so stock coding harnesses can play without an Alphaverse-specific provisioning
 step. Evaluated agents cannot inspect exchange, participant, evaluator, or
 latent-state implementation. Agent runtimes use framework-only networking;
 Codex web search and Claude Code web tools are disabled in the optional native
-harness adapters. The bundled adapters additionally configure direct-to-file
-market capture and terminal artifact streaming after Toolset URLs exist.
+harness adapters. Single-player and adaptive orchestration finalize the market
+and export terminal artifacts before Toolset teardown, independently of the
+coding harness. The bundled adapters additionally configure direct-to-file
+market capture after Toolset URLs exist.
 
 ## Install and validate
 
@@ -77,6 +82,9 @@ The package also exposes `alphaverse_codex_harness`,
 `alphaverse_claude_code_harness`, and `alphaverse_adaptive_env` for explicit
 experiments. The default `alphaverse` taskset remains a single-player evaluation
 and does not silently add an adaptive opponent.
+The single-player coordinator uses Verifiers' interaction lifecycle so closeout
+runs while the Toolset is still alive; coding harnesses must support sessions or
+resume (as the bundled adapters and stock Bash harness do).
 
 A short two-agent deployment/intermission/streaming check is available in
 [`configs/alphaverse/isolation-smoke.local.toml`](../../configs/alphaverse/isolation-smoke.local.toml).

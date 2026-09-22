@@ -108,6 +108,20 @@ async def release_trading_runtimes(trace: Any, mcp_urls: dict[str, str]) -> None
         raise
 
 
+async def finalize_episode(trace: Any, mcp_urls: dict[str, str]) -> None:
+    """Close out the market and export its result before Toolset teardown."""
+
+    if trace.state.infrastructure_error:
+        raise RuntimeError(trace.state.infrastructure_error)
+    if not isinstance(trace.state.terminal_summary, dict):
+        token = trace.state.artifact_export_token
+        url = mcp_urls.get("alphaverse")
+        if not token or not url:
+            raise RuntimeError("Alphaverse episode finalization capability is unavailable")
+        await call_framework(url, token, {"operation": "finalize_episode"})
+    await export_terminal_artifacts(trace, mcp_urls)
+
+
 async def export_terminal_artifacts(
     trace: Any,
     mcp_urls: dict[str, str],
@@ -212,7 +226,6 @@ async def export_terminal_artifacts(
         shutil.rmtree(incoming, ignore_errors=True)
         raise
     trace.state.artifact_egress_directory = str(destination)
-    trace.state.artifact_export_token = None
     trace.state.artifact_egress_complete = True
     return destination
 
@@ -222,4 +235,5 @@ __all__ = [
     "call_framework",
     "call_mcp_tool",
     "export_terminal_artifacts",
+    "finalize_episode",
 ]

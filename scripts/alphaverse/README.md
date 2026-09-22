@@ -32,3 +32,28 @@ advanced to 4 seconds after the explicit 2-second wait.
 
 This is a deterministic scripted-action smoke check, not a claim that sampled
 model actions or arbitrary uploaded strategy programs are deterministic.
+
+## Raw PnL and closeout smoke
+
+The same no-inference probe can leave an open position when its harness exits,
+or advance to the market horizon. The environment must liquidate it and export
+the terminal artifacts before scoring:
+
+```sh
+uv run eval @ configs/alphaverse/deterministic-clock.local.toml --env.agent.harness.exit-mode harness --run.name pnl-early-long
+uv run eval @ configs/alphaverse/deterministic-clock.local.toml --env.agent.harness.exit-mode harness --env.agent.harness.side sell --run.name pnl-early-short
+uv run eval @ configs/alphaverse/deterministic-clock.local.toml --env.agent.harness.exit-mode horizon --run.name pnl-horizon
+```
+
+On 2026-09-22, explicit termination, early long completion, early short
+completion, and the horizon each passed one task with two rollouts (eight total).
+Each finished flat with reward equal to raw PnL of -4.10, including 0.10 in fees,
+with no model calls. Explicit and early completion ended at 4 simulated seconds;
+the horizon case ended at 20 seconds. Streamed artifacts were exported in every
+case. No unit tests were added.
+
+Two additional early-completion rollouts used `--env.agent.harness.quantity 10`
+with a short position and `--env.taskset.task.toolset.artifact-transport inline`.
+Both finished flat with raw reward -41.00 (including 1.00 in fees), confirming
+that reward is not bounded to the former [-10, 10] range. All ten rollouts
+completed without errors, and their Docker runtimes were cleaned up.
