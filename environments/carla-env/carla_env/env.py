@@ -730,6 +730,7 @@ class CarlaEnv:
         actors: ActorManager | None = None
 
         try:
+            self._rng.seed(self.config.seed)
             scenario = self.scenario
             scenario.reset(state)
 

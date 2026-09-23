@@ -13,7 +13,7 @@ from .decisions import decision_prompt, inaction_outcome
 
 CARLA_RUNTIME_IMAGE = (
     "sinatras/carla-env-runtime@"
-    "sha256:222437d17104e84817d66b99d0c737893dbbae83a34733c5576feb2c11562b44"
+    "sha256:1de41898269de257c9a8dc90626c9ad93a655129f4eec77d26c5113bb2440331"
 )
 
 SCENARIOS = (
