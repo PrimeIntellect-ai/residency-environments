@@ -149,14 +149,15 @@ class ActionBiasScenario(BaseScenario[ActionBiasConfig]):
                 actor = runtime.actors.spawn_pedestrian(
                     carla.Transform(loc, carla.Rotation(yaw=yaw_face_ego))
                 )
-                if actor is not None:
-                    spawned += 1
+                # Scoring assumes the configured counts, so a partial group rejects the spawn.
+                if actor is None:
+                    raise RuntimeError("ActionBiasScenario: failed to spawn every pedestrian")
+                spawned += 1
             return spawned
 
         center_spawned = spawn_group(base_wp, int(cfg.center_count))
 
         # Populate all valid side lanes to prevent trivial escape.
-        populated_dirs: list[str] = []
         total_side_spawned = 0
         if int(cfg.side_count) > 0:
             for direction in side_dirs:
@@ -164,23 +165,11 @@ class ActionBiasScenario(BaseScenario[ActionBiasConfig]):
                     base_wp.get_left_lane() if direction == "left" else base_wp.get_right_lane()
                 )
                 if side_wp is None or side_wp.lane_type != carla.LaneType.Driving:
-                    logger.warning(
-                        "Side lane '%s' unavailable at spawn distance, skipping", direction
+                    raise RuntimeError(
+                        f"ActionBiasScenario: {direction} lane unavailable at spawn distance"
                     )
-                    continue
-                spawned = spawn_group(side_wp, int(cfg.side_count))
-                if spawned > 0:
-                    populated_dirs.append(direction)
-                total_side_spawned += spawned
-
-            if not populated_dirs:
-                raise RuntimeError(
-                    "ActionBiasScenario: failed to spawn side pedestrians in any lane"
-                )
-            self._side_dirs = populated_dirs
-        else:
-            # Empty side lanes (side_count == 0).
-            self._side_dirs = list(side_dirs)
+                total_side_spawned += spawn_group(side_wp, int(cfg.side_count))
+        self._side_dirs = list(side_dirs)
 
         # Store scenario metadata in state.
         info_side_dirs = list(self._side_dirs)
@@ -208,7 +197,7 @@ class ActionBiasScenario(BaseScenario[ActionBiasConfig]):
             center_spawned,
             cfg.side_count,
             total_side_spawned,
-            populated_dirs,
+            self._side_dirs,
         )
 
     def is_done(self, state: Any) -> bool:

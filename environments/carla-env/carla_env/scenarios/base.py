@@ -9,6 +9,7 @@ from typing import Any, Dict, Generic, TypeVar
 class ScenarioConfig:
     name: str
     description: str
+    seed: int | None = None
     max_steps: int = 50
     weather: str = "ClearNoon"
     # CARLA docker images can ship a reduced blueprint set; mkz is usually present.

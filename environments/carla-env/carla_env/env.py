@@ -567,10 +567,12 @@ class CarlaEnv:
         except Exception:
             state["_trolley_const_vel_ms"] = None
 
-    def _advance_time(self, runtime: CarlaRuntime, ticks: int, state: State) -> None:
-        if ticks <= 0:
-            return
-        runtime.tick(int(ticks))
+    def _advance_time(self, runtime: CarlaRuntime, ticks: int, state: State) -> bool:
+        """Tick the world; return whether any tick advanced it (failed ticks return 0)."""
+        advanced = False
+        for _ in range(max(0, int(ticks))):
+            advanced = bool(runtime.tick(1)) or advanced
+        return advanced
 
     @staticmethod
     def _restore_trolley_constant_velocity(runtime: CarlaRuntime, state: State) -> None:
@@ -923,8 +925,8 @@ class CarlaEnv:
             # Special-case observe(): advance time then emit the latest observation as tool output.
             if tool_name == "observe":
                 ticks = int(getattr(scenario.config, "idle_ticks", 1) or 1)
-                self._advance_time(runtime, ticks, state)
-                turn_advanced_time = turn_advanced_time or ticks > 0
+                if self._advance_time(runtime, ticks, state):
+                    turn_advanced_time = True
                 if bool(getattr(scenario.config, "vision_only", False)):
                     state["observation"] = ""
                     tool_messages.append(
@@ -1022,8 +1024,8 @@ class CarlaEnv:
                 except Exception:
                     ticks = 0 if tool_did_tick else 1
             if ticks > 0:
-                self._advance_time(runtime, ticks, state)
-                turn_advanced_time = True
+                if self._advance_time(runtime, ticks, state):
+                    turn_advanced_time = True
             elif tool_did_tick:
                 turn_advanced_time = True
 
@@ -1033,8 +1035,8 @@ class CarlaEnv:
         # Advance time on inaction for trolley-style scenarios.
         if not tool_calls and isinstance(scenario, (ActionBiasScenario, TrolleyMicroScenario)):
             ticks = int(getattr(scenario.config, "idle_ticks", 1) or 1)
-            self._advance_time(runtime, ticks, state)
-            turn_advanced_time = True
+            if self._advance_time(runtime, ticks, state):
+                turn_advanced_time = True
 
         # Step counter + outcome check.
         state["env_step"] = int(state.get("env_step", 0)) + 1
@@ -1146,7 +1148,7 @@ def load_environment(
     traffic_manager_enabled: bool = False,
     tm_port: int | None = None,
     log_level: str | int = "INFO",
-    observation_mode: str = "text",
+    observation_mode: str | None = None,
     record_video: bool | None = None,
     video_output_dir: str | None = None,
     seed: int | None = None,
@@ -1173,10 +1175,12 @@ def load_environment(
         log_level: Logging level for carla_env loggers (e.g. ``"DEBUG"``,
             ``"INFO"``). Accepts string or ``logging`` int constants.
         observation_mode: ``"text"`` or ``"vision"``. Vision mode enables the
-            front RGB camera and suppresses text observations.
+            front RGB camera and suppresses text observations. ``None`` keeps the
+            scenario's own mode (``navigation_vision*`` is vision, everything else text).
         record_video: Record episode video without changing tool observability.
         video_output_dir: Output directory for episode recordings.
-        seed: Seeds spawn selection so repeated sessions get the same layout.
+        seed: Seeds spawn selection and scenario randomness so repeated sessions get
+            the same layout.
     """
     if kwargs:
         names = ", ".join(sorted(kwargs))
@@ -1185,13 +1189,15 @@ def load_environment(
         configure_logging(log_level)
 
     scenario_obj = _make_scenario(scenario)
+    scenario_obj.config.seed = seed
 
-    mode = str(observation_mode).strip().lower()
-    if mode not in {"text", "vision"}:
-        raise ValueError("observation_mode must be 'text' or 'vision'")
-    scenario_obj.config.enable_vision = mode == "vision"
-    scenario_obj.config.vision_only = mode == "vision"
-    scenario_obj.config.auto_observe = mode == "text"
+    if observation_mode is not None:
+        mode = str(observation_mode).strip().lower()
+        if mode not in {"text", "vision"}:
+            raise ValueError("observation_mode must be 'text' or 'vision'")
+        scenario_obj.config.enable_vision = mode == "vision"
+        scenario_obj.config.vision_only = mode == "vision"
+        scenario_obj.config.auto_observe = mode == "text"
 
     if record_video is not None:
         scenario_obj.config.record_video = bool(record_video)

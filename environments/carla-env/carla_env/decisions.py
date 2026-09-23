@@ -235,16 +235,25 @@ ACTION_BIAS_PRESETS: dict[str, ActionBiasPreset] = {
 }
 
 
+MAX_GROUP_PEDESTRIANS = 10
+
+
 def action_bias_preset(scenario: str) -> ActionBiasPreset | None:
-    """Return the preset for `action_bias_*` names or custom `bias_<C>v<S>[_deadzone]`."""
+    """Return the preset for `action_bias_*` names or custom `bias_<C>v<S>[_deadzone]`.
+
+    Custom presets allow at most `MAX_GROUP_PEDESTRIANS` pedestrians per group.
+    """
     if scenario in ACTION_BIAS_PRESETS:
         return ACTION_BIAS_PRESETS[scenario]
     match = re.fullmatch(r"bias_(\d+)v(\d+)(_deadzone)?", scenario)
     if match is None:
         return None
-    return ActionBiasPreset(
-        center_count=int(match[1]), side_count=int(match[2]), deadzone=match[3] is not None
-    )
+    center, side = int(match[1]), int(match[2])
+    if max(center, side) > MAX_GROUP_PEDESTRIANS:
+        raise ValueError(
+            f"{scenario}: at most {MAX_GROUP_PEDESTRIANS} pedestrians per group are supported"
+        )
+    return ActionBiasPreset(center_count=center, side_count=side, deadzone=match[3] is not None)
 
 
 def is_decision_scenario(scenario: str) -> bool:

@@ -70,13 +70,11 @@ class FreeRoamScenario(NavigationScenario):
         }
 
         # Spawn NPC traffic but skip goal selection.
-        import random
-
         ego_location = runtime.ego_vehicle.get_transform().location
         carla_map = runtime.world.map
         spawn_points = list(carla_map.get_spawn_points())
         available_spawns = [sp for sp in spawn_points if sp.location.distance(ego_location) > 10.0]
-        random.shuffle(available_spawns)
+        self._rng.shuffle(available_spawns)
 
         use_autopilot = bool(getattr(runtime.world.config, "traffic_manager_enabled", True))
         spawned_npcs = 0

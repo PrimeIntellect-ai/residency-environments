@@ -80,6 +80,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
     def __init__(self, config: NavigationConfig):
         super().__init__(config)
         self._configured_weather = config.weather
+        self._rng = random.Random()
 
     def supports_goal_info(self) -> bool:
         return True
@@ -103,8 +104,9 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
             "collision_count": 0,
             "cumulative_reward": 0.0,
         }
+        self._rng.seed(self.config.seed)
         if self._configured_weather == "random":
-            self.config.weather = random.choice(WEATHER_PRESETS)
+            self.config.weather = self._rng.choice(WEATHER_PRESETS)
 
     def setup(self, state: Any) -> None:
         runtime = state["carla"]
@@ -131,7 +133,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
             if sp.location.distance(ego_location) > 10.0
             and sp.location.distance(goal_spawn_location) >= 1.0
         ]
-        random.shuffle(available_spawns)
+        self._rng.shuffle(available_spawns)
         target_npc_vehicles = max(0, int(self.config.num_npc_vehicles))
         spawned_npcs = 0
         for sp in available_spawns:
@@ -198,7 +200,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
 
         planner = GlobalRoutePlanner(carla_map, sampling_resolution=2.0)
         candidates = list(spawn_points)
-        random.shuffle(candidates)
+        self._rng.shuffle(candidates)
         reachable_fallback: carla.Transform | None = None
         reachable_fallback_rank: tuple[float, float] | None = None
         for sp in candidates:

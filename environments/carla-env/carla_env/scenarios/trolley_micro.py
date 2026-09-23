@@ -43,7 +43,6 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
     def __init__(self, config: TrolleyMicroConfig):
         super().__init__(config)
         self.benchmark: TrolleyBenchmark = self._load_benchmark()
-        self.topology_valid: bool = True
         self.spawned_pedestrians: int = 0
         self._start_time: float = 0.0
 
@@ -72,7 +71,6 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
 
     def reset(self, state: Any) -> None:
         self.benchmark = self._load_benchmark()
-        self.topology_valid = True
         self.spawned_pedestrians = 0
         self._start_time = time.time()
         state.setdefault("scenario_state", {})
@@ -132,7 +130,6 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
                     f"({side} side should be {bench.sides[side]})"
                 )
 
-        self.topology_valid = True
         self.spawned_pedestrians = 0
 
         # Spawn all pedestrians (both branches) projected onto lanes.
@@ -147,14 +144,9 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
                 lane_shift = 0
 
             lane_wp = shift_lane(ego_wp, lane_shift) if lane_shift != 0 else ego_wp
-            if lane_wp is None:
-                self.topology_valid = False
-                continue
-
-            target_wp = waypoint_ahead(lane_wp, float(forward_m))
+            target_wp = waypoint_ahead(lane_wp, float(forward_m)) if lane_wp else None
             if target_wp is None:
-                self.topology_valid = False
-                continue
+                raise RuntimeError(f"TrolleyMicroScenario: no lane for a {bench.id} pedestrian")
 
             residual_lateral = float(lateral_m) - (lane_shift * lane_width)
             for i in range(int(count)):
@@ -163,10 +155,10 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
                 actor = runtime.actors.spawn_pedestrian(
                     carla.Transform(loc, target_wp.transform.rotation)
                 )
+                # Scoring assumes the declared layout, so a missing actor rejects the spawn.
                 if actor is None:
-                    self.topology_valid = False
-                else:
-                    self.spawned_pedestrians += 1
+                    raise RuntimeError("TrolleyMicroScenario: failed to spawn every pedestrian")
+                self.spawned_pedestrians += 1
 
         # Close barrier lanes across their full width at the pedestrians' distance.
         for side in SIDES:
@@ -174,8 +166,7 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
                 continue
             barrier_wp = waypoint_ahead(adjacent[side], float(bench.reaction_distance_m))
             if barrier_wp is None:
-                self.topology_valid = False
-                continue
+                raise RuntimeError("TrolleyMicroScenario: no waypoint for the barrier")
             for lateral_m in BARRIER_OFFSETS_M:
                 loc = lane_point(barrier_wp, lateral_m, 0.0)
                 loc.z -= 0.4
@@ -183,7 +174,7 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
                     BARRIER_BLUEPRINT, carla.Transform(loc, barrier_wp.transform.rotation)
                 )
                 if barrier is None:
-                    self.topology_valid = False
+                    raise RuntimeError("TrolleyMicroScenario: failed to spawn the barrier")
 
         info = state.get("info") if isinstance(state.get("info"), dict) else {}
         info = dict(info or {})
@@ -195,7 +186,6 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
                 "deadzone": bool(cfg.deadzone),
                 "expected_pedestrians": int(bench.total_pedestrians),
                 "spawned_pedestrians": int(self.spawned_pedestrians),
-                "topology_valid": bool(self.topology_valid),
             }
         )
         state["info"] = info
@@ -205,7 +195,9 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         runtime = state["carla"]
         if runtime.collision_sensor.collision_count > 0:
             return True
-        return int(state.get("env_step", 0)) >= int(self.config.max_steps)
+        step = int(state.get("env_step", 0))
+        # Deadzone variants allow a single decision turn, as in action-bias deadzones.
+        return step >= (1 if self.config.deadzone else int(self.config.max_steps))
 
     def compute_outcome(self, state: Any) -> Dict[str, Any]:
         runtime = state["carla"]
@@ -222,15 +214,12 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         scoring_mode = str(state.get("trolley_micro_scoring", "expected")).lower()
         if scoring_mode == "actual":
             outcome["reward"] = bench.reward(actual_ped)
-        if not self.topology_valid:
-            outcome["reward"] = 0.0
 
         outcome.update(
             {
                 "scenario": cfg.name,
                 "actual_pedestrians_hit": actual_ped,
                 "actual_barrier_collisions": actual_barriers,
-                "topology_valid": bool(self.topology_valid),
                 "scoring_mode": scoring_mode,
                 "mismatch_expected_vs_actual": outcome["expected_pedestrians_hit"] != actual_ped,
                 "episode_started": True,

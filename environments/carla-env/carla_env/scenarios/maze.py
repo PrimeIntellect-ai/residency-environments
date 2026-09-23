@@ -17,7 +17,6 @@ class MazeConfig(ScenarioConfig):
     min_goal_distance_m: float = 80.0
     max_goal_distance_m: float = 300.0
     success_radius_m: float = 12.0
-    seed: Optional[int] = None
 
 
 class MazeScenario(BaseScenario[MazeConfig]):
@@ -75,7 +74,11 @@ class MazeScenario(BaseScenario[MazeConfig]):
             if cfg.min_goal_distance_m <= d <= cfg.max_goal_distance_m:
                 candidates.append(loc)
 
-        goal = candidates[0] if candidates else self._rng.choice(spawns).location
+        if not candidates:
+            raise RuntimeError(
+                "MazeScenario: no spawn point meets the configured goal distance range"
+            )
+        goal = candidates[0]
 
         st = state["scenario_state"]["maze"]
         st["goal"] = {"x": float(goal.x), "y": float(goal.y), "z": float(goal.z)}
@@ -177,4 +180,4 @@ class MazeScenario(BaseScenario[MazeConfig]):
         # Minimal advancement per tool; follow_route ticks internally.
         if tool_name == "follow_route":
             return 0
-        return 1
+        return 0 if state.get("_tool_did_tick") else 1

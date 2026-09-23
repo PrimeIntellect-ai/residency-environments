@@ -21,8 +21,7 @@ def safe_destroy(actor: carla.Actor | None, *, name: str = "actor") -> bool:
         if not actor.is_alive:
             return True  # Already dead — nothing to clean up
         safe_stop_sensor(actor)
-        actor.destroy()
-        return True
+        return bool(actor.destroy())
     except Exception:  # noqa: BLE001 - CARLA can throw various runtime errors here
         return False
 
