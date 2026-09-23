@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 import carla
 
 from ..logging import get_logger
+from ..procedural import MAZE_SUCCESS_RADIUS_M
 from .base import BaseScenario, ScenarioConfig
 
 logger = get_logger("scenarios.maze")
@@ -16,7 +17,7 @@ logger = get_logger("scenarios.maze")
 class MazeConfig(ScenarioConfig):
     min_goal_distance_m: float = 80.0
     max_goal_distance_m: float = 300.0
-    success_radius_m: float = 12.0
+    success_radius_m: float = MAZE_SUCCESS_RADIUS_M
 
 
 class MazeScenario(BaseScenario[MazeConfig]):

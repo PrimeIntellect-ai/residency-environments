@@ -14,7 +14,6 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
 from verifiers.v1.utils.decorators import discover_decorated
 
-from .decisions import is_decision_scenario
 from .v1 import CarlaState, CarlaTaskData
 
 
@@ -56,7 +55,6 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
         self._task_data: CarlaTaskData | None = None
         self._session = None
         self._session_state: dict[str, Any] | None = None
-        self._initial_context = ""
         self._carla_process: asyncio.subprocess.Process | None = None
 
     async def setup_task(self, task: CarlaTaskData) -> None:
@@ -148,7 +146,6 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
             {
                 "host": "127.0.0.1",
                 "port": 2000,
-                "traffic_manager_enabled": False,
                 "observation_mode": self._task_data.modality,
                 "seed": self._task_data.seed,
             }
@@ -158,15 +155,6 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
         await session.setup_state(session_state)
         self._session = session
         self._session_state = session_state
-        # Decision tasks carry their static prompt in the task data.
-        if is_decision_scenario(self._task_data.scenario):
-            return
-        prompt = session_state.get("prompt") or []
-        self._initial_context = "\n\n".join(
-            str(message.get("content") or "")
-            for message in prompt
-            if isinstance(message, dict) and isinstance(message.get("content"), str)
-        )
 
     async def _close_session(self) -> None:
         if self._session is None or self._session_state is None:
@@ -211,9 +199,6 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
         self._sync_state()
 
         blocks: list[TextContent | ImageContent] = []
-        if self._initial_context:
-            blocks.append(TextContent(type="text", text=self._initial_context))
-            self._initial_context = ""
         is_error = False
         for message in messages:
             content = message.get("content")
@@ -286,7 +271,8 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
 
     @vf.tool
     async def get_goal_info(self) -> CallToolResult:
-        """Return the current distance and coarse direction to the active goal."""
+        """Report the active goal's distance and coarse direction, and its coordinates when
+        the task reveals them."""
         return await self._call("get_goal_info", {})
 
     @vf.tool

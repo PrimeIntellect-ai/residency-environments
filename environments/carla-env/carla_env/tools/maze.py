@@ -15,7 +15,9 @@ def _runtime(state: Any):
 
 def get_goal_info(state: Any = None) -> str:
     """
-    Report distance + rough direction to the goal.
+    Report distance + rough direction to the goal, plus the navigation destination.
+
+    Maze goals stay hidden; navigation destinations are revealed.
     """
     if state is None:
         return "Error: no state"
@@ -23,6 +25,7 @@ def get_goal_info(state: Any = None) -> str:
     rt = _runtime(state)
     goal_loc: carla.Location | None = None
     tracking_state: dict | None = None
+    destination = ""
     maze_state = state.get("scenario_state", {}).get("maze", {})
     maze_goal = maze_state.get("goal")
     if isinstance(maze_goal, dict):
@@ -46,6 +49,7 @@ def get_goal_info(state: Any = None) -> str:
                     z=float(navigation_goal[2]),
                 )
                 tracking_state = state.get("scenario_state", {}).get("navigation", {})
+                destination = f"destination=({goal_loc.x:.1f}, {goal_loc.y:.1f}, {goal_loc.z:.1f}) "
             except Exception:
                 pass
 
@@ -84,5 +88,5 @@ def get_goal_info(state: Any = None) -> str:
         else:
             improving = False
     if bool(state.get("_vision_only", False)):
-        return f"distance_to_goal_m={dist:.1f} improving={improving}"
-    return f"distance_to_goal_m={dist:.1f} direction={cardinal} improving={improving}"
+        return f"{destination}distance_to_goal_m={dist:.1f} improving={improving}"
+    return f"{destination}distance_to_goal_m={dist:.1f} direction={cardinal} improving={improving}"

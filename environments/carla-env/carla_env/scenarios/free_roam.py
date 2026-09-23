@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 import carla
 
+from ..procedural import COVERAGE_CELL_M, COVERAGE_TARGET_CELLS
 from .navigation import NavigationConfig, NavigationScenario
 
 
@@ -17,11 +18,22 @@ class FreeRoamConfig(NavigationConfig):
     vision_only: bool = False
     random_goal: bool = False
     max_steps: int = 500
-    coverage_cell_m: float = 20.0
+    coverage_cell_m: float = COVERAGE_CELL_M
+    coverage_target_cells: int = COVERAGE_TARGET_CELLS
 
 
 class FreeRoamScenario(NavigationScenario):
-    """Open-ended driving scenario with no navigation goal or goal-based termination."""
+    """Open-ended driving scenario with no navigation goal or goal-based termination.
+
+    The score is the share of `coverage_target_cells` new map cells the ego path crossed,
+    sampled on every tick, and zero after a collision.
+    """
+
+    def __init__(self, config: FreeRoamConfig):
+        super().__init__(config)
+        self._visited_cells: set[str] = set()
+        self._distance_m = 0.0
+        self._last_location: Any = None
 
     @staticmethod
     def _distinct_collision_count(runtime: Any) -> int:
@@ -65,32 +77,29 @@ class FreeRoamScenario(NavigationScenario):
         size = max(1.0, float(self.config.coverage_cell_m))
         return f"{math.floor(float(location.x) / size)}:{math.floor(float(location.y) / size)}"
 
+    def _sample_path(self, runtime: Any) -> None:
+        location = runtime.ego_vehicle.get_location()
+        if self._last_location is not None:
+            self._distance_m += float(location.distance(self._last_location))
+        self._last_location = location
+        self._visited_cells.add(self._coverage_cell(location))
+
     def setup(self, state: Any) -> None:
         runtime = state["carla"]
         state.setdefault("scenario_data", {})
         state.setdefault("scenario_state", {})
         state["scenario_state"]["navigation"] = {
-            "prev_goal_distance": None,
             "initial_route_distance": None,
             "best_distance_m": None,
             "collision_count": 0,
-            "cumulative_reward": 0.0,
         }
 
         # Spawn NPC traffic but skip goal selection.
         ego_location = runtime.ego_vehicle.get_transform().location
-        nav_state = state["scenario_state"]["navigation"]
-        nav_state.update(
-            {
-                "previous_location": {
-                    "x": float(ego_location.x),
-                    "y": float(ego_location.y),
-                    "z": float(ego_location.z),
-                },
-                "distance_traveled_m": 0.0,
-                "visited_cells": [self._coverage_cell(ego_location)],
-            }
-        )
+        self._visited_cells = {self._coverage_cell(ego_location)}
+        self._distance_m = 0.0
+        self._last_location = ego_location
+        runtime.tick_listeners.append(lambda: self._sample_path(runtime))
         carla_map = runtime.world.map
         spawn_points = list(carla_map.get_spawn_points())
         available_spawns = [sp for sp in spawn_points if sp.location.distance(ego_location) > 10.0]
@@ -161,60 +170,17 @@ class FreeRoamScenario(NavigationScenario):
 
     def compute_outcome(self, state: Any) -> Dict[str, Any]:
         runtime = state.get("carla")
-        current_collisions = self._distinct_collision_count(runtime)
-        steps = int(state.get("env_step", 0))
-
-        nav_state = state.get("scenario_state", {}).get("navigation", {})
-        prev_reward = float(nav_state.get("cumulative_reward", 0.0))
-        prev_collisions = int(nav_state.get("collision_count", 0))
-        new_collisions = max(0, current_collisions - prev_collisions)
-        nav_state["collision_count"] = current_collisions
-
-        ticked = bool(state.get("_turn_advanced_time", False))
-        current_location = runtime.ego_vehicle.get_location() if runtime is not None else None
-        previous_location = nav_state.get("previous_location")
-        distance_delta = 0.0
-        if current_location is not None and isinstance(previous_location, dict):
-            previous = carla.Location(
-                x=float(previous_location["x"]),
-                y=float(previous_location["y"]),
-                z=float(previous_location["z"]),
-            )
-            distance_delta = float(current_location.distance(previous))
-        if current_location is not None:
-            nav_state["previous_location"] = {
-                "x": float(current_location.x),
-                "y": float(current_location.y),
-                "z": float(current_location.z),
-            }
-
-        distance_traveled = float(nav_state.get("distance_traveled_m", 0.0)) + distance_delta
-        nav_state["distance_traveled_m"] = distance_traveled
-        visited_cells = set(str(cell) for cell in nav_state.get("visited_cells", []))
-        new_cell = False
-        if current_location is not None:
-            cell = self._coverage_cell(current_location)
-            new_cell = cell not in visited_cells
-            visited_cells.add(cell)
-        nav_state["visited_cells"] = sorted(visited_cells)
-
-        movement_reward = min(distance_delta, 20.0) * 0.01 if ticked else 0.0
-        coverage_reward = 0.25 if ticked and new_cell else 0.0
-        idle_penalty = -0.02 if ticked and distance_delta < 0.25 else 0.0
-        step_reward = movement_reward + coverage_reward + idle_penalty - (5.0 * new_collisions)
-        cumulative_reward = prev_reward + step_reward
-        nav_state["cumulative_reward"] = cumulative_reward
-
+        collided = self._distinct_collision_count(runtime) > 0
+        new_cells = max(0, len(self._visited_cells) - 1)
+        target = max(1, int(self.config.coverage_target_cells))
         outcome = {
             "scenario": self.config.name,
             "goal_reached": False,
-            "collision": current_collisions > 0,
-            "steps": steps,
-            "distance_traveled_m": distance_traveled,
-            "coverage_cells": len(visited_cells),
-            "stalled": bool(ticked and distance_delta < 0.25),
-            "reward": float(cumulative_reward),
-            "step_reward": float(step_reward),
+            "collision": collided,
+            "steps": int(state.get("env_step", 0)),
+            "distance_traveled_m": float(self._distance_m),
+            "coverage_cells": new_cells,
+            "reward": 0.0 if collided else min(1.0, new_cells / target),
         }
         state.setdefault("scenario_outcome", {})
         state["scenario_outcome"].update(outcome)

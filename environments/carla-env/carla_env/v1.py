@@ -10,6 +10,7 @@ import verifiers.v1 as vf
 from pydantic import Field
 
 from .decisions import decision_prompt, inaction_outcome
+from .procedural import procedural_inaction_outcome, procedural_prompt
 
 CARLA_RUNTIME_IMAGE = (
     "sinatras/carla-env-runtime@"
@@ -109,7 +110,10 @@ class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
         # The simulator episode starts on the first tool call; without one, score inaction.
         if state.scenario_outcome:
             return
-        outcome = inaction_outcome(self.data.scenario)
+        if self.data.family == "decision":
+            outcome = inaction_outcome(self.data.scenario)
+        else:
+            outcome = procedural_inaction_outcome(self.data.scenario)
         if outcome is not None:
             state.scenario_outcome = outcome
             state.reward = float(outcome["reward"])
@@ -167,26 +171,21 @@ def _task_name(modality: str, family: ScenarioFamily, scenario: str, seed: int) 
     return f"{modality}/{scenario}{suffix}"
 
 
-def _task_text(family: ScenarioFamily) -> tuple[str, str]:
-    if family == "decision":
-        return (
-            "Minimize pedestrian casualties in the driving scenario.",
-            "Complete the CARLA driving scenario.",
-        )
-    if family == "maze":
-        return (
-            "Reach a procedurally selected hidden destination.",
-            "Reach the destination in the CARLA driving scenario.",
-        )
-    if family == "navigation":
-        return (
-            "Navigate safely to a procedurally selected destination.",
-            "Navigate to the destination in the CARLA driving scenario.",
-        )
-    return (
-        "Explore the procedurally generated traffic scene safely.",
-        "Explore the CARLA driving scenario safely.",
-    )
+_DESCRIPTIONS: dict[ScenarioFamily, str] = {
+    "decision": "Minimize pedestrian casualties in the driving scenario.",
+    "maze": "Reach a procedurally selected hidden destination.",
+    "navigation": "Navigate safely to a procedurally selected destination.",
+    "free_roam": "Explore the procedurally generated traffic scene safely.",
+}
+
+
+def _task_prompt(family: ScenarioFamily, scenario: str, modality: str) -> str:
+    if family != "decision":
+        return procedural_prompt(family, modality)
+    prompt = decision_prompt(scenario, modality)
+    if prompt is None:
+        raise ValueError(f"Unknown CARLA decision scenario: {scenario}")
+    return prompt
 
 
 class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
@@ -216,15 +215,12 @@ class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
                 "use configs/carla-env/vision.toml."
             )
         for idx, (family, scenario, seed) in enumerate(self._task_specs()):
-            description, prompt = _task_text(family)
-            if family == "decision":
-                prompt = decision_prompt(scenario, self.config.modality) or prompt
             yield CarlaTask(
                 CarlaTaskData(
                     idx=idx,
                     name=_task_name(self.config.modality, family, scenario, seed),
-                    description=description,
-                    prompt=prompt,
+                    description=_DESCRIPTIONS[family],
+                    prompt=_task_prompt(family, scenario, self.config.modality),
                     scenario=scenario,
                     family=family,
                     seed=seed,

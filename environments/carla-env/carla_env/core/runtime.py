@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Optional
 
 import carla
@@ -33,6 +33,8 @@ class CarlaRuntime:
     collision_sensor: CollisionSensor
     camera_sensor: Optional["CameraSensor"] = None
     tick_hook: Optional[Callable[[], object]] = None
+    # Called after every tick, so scenarios can sample the ego path inside long tool calls.
+    tick_listeners: list[Callable[[], None]] = field(default_factory=list)
 
     def tick(self, n: int) -> int:
         frame = 0
@@ -43,4 +45,6 @@ class CarlaRuntime:
                     frame = result
             else:
                 frame = self.world.tick()
+            for listener in self.tick_listeners:
+                listener()
         return frame

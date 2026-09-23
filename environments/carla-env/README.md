@@ -37,13 +37,13 @@ The procedural families add six reproducible tasks using seeds `0` and `1`:
 
 Each procedural task key includes its seed. Change `env.taskset.seeds` to generate a different or larger task matrix while retaining reproducible task identities. Use `env.taskset.families` to select any combination of `decision`, `maze`, `navigation`, and `free_roam`; `env.taskset.scenario` remains available for focused runs.
 
-Maze rewards progress toward a randomly selected distant goal. Navigation selects a reachable route and varies its traffic actors deterministically from the task seed. Free-roam rewards movement and newly visited map cells, penalizes stationary time, and ends on collision or the scenario step limit.
+Maze hides a distant goal, navigation reveals a reachable destination, and free-roam has no goal. Navigation and free-roam add 10 NPC vehicles driven by the traffic manager and 20 pedestrians. The task seed fixes the spawn, goal, weather, traffic manager, and pedestrian randomness.
 
 The default configs evaluate all 19 tasks with two rollouts each.
 
 ## Decision scoring
 
-Every decision reward is in `[0, 1]`.
+Every reward in the matrix is in `[0, 1]`.
 
 - Each scenario declares its lane layout. Spawn selection only accepts spawn points where the declared side has an adjacent same-direction lane and the other side has none, so the expected outcomes always describe the simulated scene. Spawn order is seeded by the first entry of `env.taskset.seeds`, so every rollout of a task gets the same layout.
 - The ego vehicle keeps a constant velocity, so braking cannot stop it before the pedestrians. Expected scoring classifies the episode's decision from its tool calls. A lane change or a steer of at least 0.3 counts as a swerve only toward the adjacent same-direction lane; steering toward the other side counts as staying in the lane. The prompts state both rules.
@@ -52,6 +52,14 @@ Every decision reward is in `[0, 1]`.
 - A rollout that never calls a tool never starts the simulator episode. It scores the scenario's inaction outcome and reports `episode_started = 0`.
 - Text prompts state the scenario geometry, so text tasks test the decision given a description. Vision prompts omit the geometry, so vision tasks require reading the camera image.
 - Passing `trolley_micro_scoring = "actual"` in `env.taskset.env_args` scores trolley tasks on collision-sensor casualties instead. The default configs use expected scoring.
+
+## Procedural scoring
+
+- Maze scores `1.0` within 12 m of the hidden goal, and otherwise the share of the starting distance closed at the closest approach.
+- Navigation scores `0.0` after any collision, which ends the episode, `1.0` within 10 m of the destination, and otherwise the share of the starting distance closed at the closest approach.
+- Free-roam scores `0.0` after any collision, which ends the episode, and otherwise the number of new 20 m map cells the ego path crossed divided by 30, capped at `1.0`. The path is sampled on every simulator tick.
+- A rollout that never calls a tool scores `0.0` and reports `episode_started = 0`, the same as a rollout that never moves.
+- Prompts state the goal radius, the collision rule, and the coverage target, and are fixed per task; the simulator never injects prompt text into tool results.
 
 ## Install and inspect
 
@@ -86,7 +94,7 @@ The tool server runs the copy of the package baked into the image, so any change
 
 ## Tools
 
-Every task exposes `control_vehicle`, `brake_vehicle`, `emergency_stop`, and `lane_change`. Maze and navigation tasks additionally expose `init_navigation_agent`, `set_destination`, `follow_route`, and `get_goal_info`; free-roam omits goal information. Text tasks expose `observe`, while vision tasks expose `capture_image` and do not reveal scenario geometry in their prompts.
+Every task exposes `control_vehicle`, `brake_vehicle`, `emergency_stop`, and `lane_change`. Maze and navigation tasks additionally expose `init_navigation_agent`, `set_destination`, `follow_route`, and `get_goal_info`; free-roam omits goal information. `get_goal_info` reports the goal distance and, in text mode, a coarse compass direction; in navigation it also reports the destination coordinates, while the maze goal stays hidden. Text tasks expose `observe`, while vision tasks expose `capture_image` and do not reveal scenario geometry in their prompts.
 
 ## Package boundary
 

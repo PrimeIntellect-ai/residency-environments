@@ -511,7 +511,9 @@ class CarlaEnv:
                 sync_mode=self.config.sync_mode,
                 fixed_delta_seconds=self.config.fixed_delta_seconds,
                 weather=getattr(scenario.config, "weather", self.config.weather),
-                traffic_manager_enabled=bool(self.config.traffic_manager_enabled),
+                # NPC vehicles only drive under the traffic manager's autopilot.
+                traffic_manager_enabled=bool(self.config.traffic_manager_enabled)
+                or int(getattr(scenario.config, "num_npc_vehicles", 0) or 0) > 0,
                 seed=self.config.seed,
             ),
         )
@@ -1175,7 +1177,8 @@ def load_environment(
         port: CARLA server port. Defaults to ``$CARLA_PORT`` or ``2000``.
         trolley_micro_scoring: ``"expected"`` (stable, benchmark-based) or
             ``"actual"`` (collision-sensor based) for trolley micro scenarios.
-        traffic_manager_enabled: Force-enable/disable CARLA TrafficManager.
+        traffic_manager_enabled: Force-enable CARLA TrafficManager. Scenarios that spawn
+            NPC vehicles enable it regardless, so the vehicles drive.
         log_level: Logging level for carla_env loggers (e.g. ``"DEBUG"``,
             ``"INFO"``). Accepts string or ``logging`` int constants.
         observation_mode: ``"text"`` or ``"vision"``. Vision mode enables the

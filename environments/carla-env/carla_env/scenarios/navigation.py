@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import carla
 
 from ..logging import get_logger
+from ..procedural import NAVIGATION_SUCCESS_RADIUS_M
 from .base import BaseScenario, ScenarioConfig
 
 logger = get_logger("scenarios.navigation")
@@ -62,7 +63,7 @@ class NavigationConfig(ScenarioConfig):
     map_name: Optional[str] = None
     num_npc_vehicles: int = 0
     num_pedestrians: int = 0
-    success_radius: float = 10.0
+    success_radius: float = NAVIGATION_SUCCESS_RADIUS_M
     random_goal: bool = True
     goal_location: Optional[Tuple[float, float, float]] = None
     route_distance_min: float = 100.0
@@ -99,11 +100,9 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         self._rng.seed(self.config.seed)
         state.setdefault("scenario_state", {})
         state["scenario_state"]["navigation"] = {
-            "prev_goal_distance": None,
             "initial_route_distance": None,
             "best_distance_m": None,
             "collision_count": 0,
-            "cumulative_reward": 0.0,
         }
         if self._configured_weather == "random":
             self.config.weather = self._rng.choice(WEATHER_PRESETS)
@@ -124,7 +123,6 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
 
         initial_distance = float(goal_spawn_location.distance(ego_location))
         navigation_state["initial_route_distance"] = initial_distance
-        navigation_state["prev_goal_distance"] = initial_distance
         navigation_state["best_distance_m"] = initial_distance
 
         available_spawns = [
@@ -260,36 +258,28 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         return False
 
     def compute_outcome(self, state: Any) -> Dict[str, Any]:
+        """Score 0 after a collision, 1 at the goal, else the best progress toward it."""
         navigation_state = state.get("scenario_state", {}).get("navigation", {})
         goal_distance = self._goal_distance(state)
         initial_distance = float(navigation_state.get("initial_route_distance") or 1.0)
-        previous_distance = float(navigation_state.get("prev_goal_distance") or goal_distance)
+        best_distance = min(
+            float(navigation_state.get("best_distance_m") or goal_distance), goal_distance
+        )
+        navigation_state["best_distance_m"] = best_distance
+        progress = max(0.0, min(1.0, 1.0 - best_distance / max(initial_distance, 1.0)))
 
         runtime = state.get("carla")
         collision = bool(runtime is not None and runtime.collision_sensor.collision_count > 0)
-        advanced_time = bool(state.get("_turn_advanced_time", False))
-        progress = (
-            (previous_distance - goal_distance) / max(initial_distance, 1.0)
-            if advanced_time
-            else 0.0
-        )
         goal_reached = goal_distance < float(self.config.success_radius)
-        time_penalty = -0.01 if advanced_time else 0.0
-        step_reward = (
-            progress + (10.0 if goal_reached else 0.0) + (-5.0 if collision else 0.0) + time_penalty
-        )
-        cumulative_reward = float(navigation_state.get("cumulative_reward") or 0.0) + step_reward
-
-        navigation_state["prev_goal_distance"] = goal_distance
-        navigation_state["cumulative_reward"] = cumulative_reward
+        reward = 0.0 if collision else (1.0 if goal_reached else progress)
 
         outcome = {
             "scenario": self.config.name,
             "goal_reached": goal_reached,
             "goal_distance": float(goal_distance),
             "collision": collision,
-            "reward": float(cumulative_reward),
-            "step_reward": float(step_reward),
+            "progress": progress,
+            "reward": float(reward),
             "route_distance_total": float(initial_distance),
             "route_distance_remaining": float(goal_distance),
         }
