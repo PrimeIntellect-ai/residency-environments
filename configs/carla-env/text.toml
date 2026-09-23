@@ -7,25 +7,21 @@ push = false
 id = "carla-env"
 modality = "text"
 
+# Prime sandboxes do not expose ports, so the tool server shares the agent's VM.
 [env.taskset.task.tools]
-colocated = false
-
-[env.taskset.task.tools.runtime]
-type = "prime"
-image = "sinatras/carla-env-runtime@sha256:e7d14c3ced7cec518872067a9b00f10f1352e781b8f4b6028adb41323593d331"
-workdir = "/home/carla"
-vm = false
-region = "us"
-cpu = 4
-memory = 8
-disk = 40
+colocated = true
 
 [env.agent.harness]
 id = "null"
 
 [env.agent.runtime]
 type = "prime"
+image = "sinatras/carla-env-runtime@sha256:e7d14c3ced7cec518872067a9b00f10f1352e781b8f4b6028adb41323593d331"
+workdir = "/home/carla"
 vm = true
+cpu = 4
+memory = 8
+disk = 40
 
 [env.agent.timeout]
 setup = 600

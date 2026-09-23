@@ -4,10 +4,10 @@ Native Verifiers v1 tasks for evaluating driving decisions in CARLA 0.10.0.
 
 The environment exposes one 13-scenario task matrix in two observation modes:
 
-- `configs/carla-env/text.toml` runs the full matrix without rendering on Prime CPU sandboxes.
+- `configs/carla-env/text.toml` runs the full matrix without rendering on Prime CPU VM sandboxes.
 - `configs/carla-env/vision.toml` runs the same matrix with RGB observations in a local GPU Docker runtime.
 
-Each rollout gets a task-scoped MCP tool server. The server starts CARLA in the same isolated runtime, owns the simulator connection, and exposes only the tools for the selected modality. Agent sandboxes have no direct network access to the CARLA RPC server.
+Each rollout gets a task-scoped MCP tool server. The server starts CARLA in its runtime, owns the simulator connection, and exposes only the tools for the selected modality. In the vision config the tool server runs in its own Docker container, and the agent has no network access to the CARLA RPC server. Prime sandboxes do not expose ports, so the text config colocates the tool server with the agent program in one Prime VM built from the runtime image. The `null` harness can only call the MCP tools; a harness that executes code in that VM could reach the CARLA RPC port.
 
 ## Scenario matrix
 
