@@ -14,6 +14,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
 from verifiers.v1.utils.decorators import discover_decorated
 
+from .decisions import is_decision_scenario
 from .v1 import CarlaState, CarlaTaskData
 
 
@@ -149,6 +150,7 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
                 "port": 2000,
                 "traffic_manager_enabled": False,
                 "observation_mode": self._task_data.modality,
+                "seed": self._task_data.seed,
             }
         )
         session = load_environment(scenario=self._task_data.scenario, **args)
@@ -156,6 +158,9 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
         await session.setup_state(session_state)
         self._session = session
         self._session_state = session_state
+        # Decision tasks carry their static prompt in the task data.
+        if is_decision_scenario(self._task_data.scenario):
+            return
         prompt = session_state.get("prompt") or []
         self._initial_context = "\n\n".join(
             str(message.get("content") or "")

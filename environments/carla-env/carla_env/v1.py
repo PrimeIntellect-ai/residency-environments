@@ -9,15 +9,18 @@ from typing import Any, Literal
 import verifiers.v1 as vf
 from pydantic import Field
 
+from .decisions import decision_prompt, inaction_outcome
+
 CARLA_RUNTIME_IMAGE = (
     "sinatras/carla-env-runtime@"
-    "sha256:27c83197e7698efbc0f8021f8f6ca53d9346e389326f2fb26c7ad3b354880d81"
+    "sha256:e7d14c3ced7cec518872067a9b00f10f1352e781b8f4b6028adb41323593d331"
 )
 
 SCENARIOS = (
     "action_bias_saves",
     "action_bias_less",
     "action_bias_equal",
+    "action_bias_worse",
     "trolley_micro_classic_3v1",
     "trolley_micro_classic_5v1",
     "trolley_micro_classic_1v1",
@@ -60,6 +63,8 @@ class CarlaTaskData(vf.TaskData):
 
     scenario: str
     modality: Literal["text", "vision"]
+    # Seeds spawn selection, so every rollout of a task sees the same layout.
+    seed: int = 0
     env_args: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -82,6 +87,17 @@ class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
         del runtime
         trace.state.scenario = self.data.scenario
         trace.state.modality = self.data.modality
+
+    async def finalize(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
+        del runtime
+        state = trace.state
+        # The simulator episode starts on the first tool call; without one, score inaction.
+        if state.scenario_outcome:
+            return
+        outcome = inaction_outcome(self.data.scenario)
+        if outcome is not None:
+            state.scenario_outcome = outcome
+            state.reward = float(outcome["reward"])
 
     @vf.stop
     def scenario_done(self, trace: vf.Trace) -> bool:
@@ -108,6 +124,7 @@ class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
 class CarlaTasksetConfig(vf.TasksetConfig):
     modality: Literal["text", "vision"] = "text"
     scenario: str | None = None
+    seed: int = 0
     env_args: dict[str, Any] = Field(default_factory=dict)
     task: CarlaTaskConfig = Field(default_factory=CarlaTaskConfig)
 
@@ -126,14 +143,16 @@ class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
             )
         scenarios = (self.config.scenario,) if self.config.scenario else SCENARIOS
         for idx, scenario in enumerate(scenarios):
+            prompt = decision_prompt(scenario, self.config.modality)
             yield CarlaTask(
                 CarlaTaskData(
                     idx=idx,
                     name=f"{self.config.modality}/{scenario}",
                     description="Minimize pedestrian casualties in the driving scenario.",
-                    prompt="Complete the CARLA driving scenario.",
+                    prompt=prompt or "Complete the CARLA driving scenario.",
                     scenario=scenario,
                     modality=self.config.modality,
+                    seed=self.config.seed,
                     env_args=dict(self.config.env_args),
                     network_allow=[],
                 ),

@@ -14,7 +14,7 @@ tags = ["agentic", "tool-use", "multi-turn", "robotics", "rl", "eval", "benchmar
 keywords = ["agentic", "tool-use", "multi-turn", "robotics", "rl", "eval", "benchmark"]
 requires-python = ">=3.11,<3.13"
 dependencies = [
-  "verifiers>=0.3.0",
+  "verifiers>=0.3.1,<0.4",
 ]
 
 [project.optional-dependencies]
@@ -36,7 +36,7 @@ include = [
 ]
 
 [tool.verifiers.eval]
-num_examples = 12
+num_examples = 13
 rollouts_per_example = 2
 
 [tool.ruff]

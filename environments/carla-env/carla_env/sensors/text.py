@@ -74,7 +74,7 @@ class TextSensor:
                 if actor.id == ego.id:
                     continue
                 tid = str(getattr(actor, "type_id", ""))
-                if not (tid.startswith("vehicle.") or tid.startswith("walker.")):
+                if not tid.startswith(("vehicle.", "walker.", "static.prop.")):
                     continue
                 dist = float(actor.get_location().distance(loc))
                 if dist <= self._radius_m:
@@ -85,9 +85,9 @@ class TextSensor:
 
         if nearby:
             lines.append(f"Nearby actors ({min(len(nearby), self._max_actors)}):")
+            kinds = {"walker": "ped", "vehicle": "veh", "static": "prop"}
             for dist, tid in nearby[: self._max_actors]:
-                kind = "ped" if tid.startswith("walker.") else "veh"
-                lines.append(f"  - {kind} {dist:.1f}m {tid}")
+                lines.append(f"  - {kinds[tid.split('.', 1)[0]]} {dist:.1f}m {tid}")
         else:
             lines.append("Nearby actors: none")
 

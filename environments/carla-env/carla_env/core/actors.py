@@ -113,7 +113,7 @@ class ActorManager:
             logger.warning("Failed to list world actors for cleanup: %s", e)
             return
 
-        destroy_types = ("vehicle.", "walker.", "sensor.")
+        destroy_types = ("vehicle.", "walker.", "sensor.", "static.prop.")
         to_destroy: list[carla.Actor] = []
         for actor in actors:
             try:
@@ -209,6 +209,12 @@ class ActorManager:
         if bp.has_attribute("is_invincible"):
             bp.set_attribute("is_invincible", "false")
         actor = self.world.try_spawn_actor(bp, transform)
+        if actor is not None:
+            self._actors.append(actor)
+        return actor
+
+    def spawn_prop(self, blueprint_id: str, transform: carla.Transform) -> Optional[carla.Actor]:
+        actor = self.world.try_spawn_actor(self.blueprints.find(blueprint_id), transform)
         if actor is not None:
             self._actors.append(actor)
         return actor
