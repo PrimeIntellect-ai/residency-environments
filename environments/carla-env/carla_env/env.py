@@ -861,7 +861,9 @@ class CarlaEnv:
         # Handle tool calls
         for tc in tool_calls:
             if isinstance(tc, dict):
-                function = tc.get("function", {})
+                function = tc.get("function")
+                if not isinstance(function, dict):
+                    function = {}
                 tool_name = function.get("name") or tc.get("name") or ""
                 arg_str = function.get("arguments") or tc.get("arguments") or tc.get("args") or "{}"
                 tool_call_id = tc.get("id", "") or tc.get("tool_call_id", "")

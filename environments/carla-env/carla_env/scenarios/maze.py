@@ -66,19 +66,22 @@ class MazeScenario(BaseScenario[MazeConfig]):
 
         ego_loc = runtime.ego_vehicle.get_location()
 
-        # Pick a goal far enough from ego.
-        candidates: list[carla.Location] = []
-        for _ in range(200):
-            loc = self._rng.choice(spawns).location
-            d = float(loc.distance(ego_loc))
-            if cfg.min_goal_distance_m <= d <= cfg.max_goal_distance_m:
-                candidates.append(loc)
-
-        if not candidates:
+        # Pick a goal far enough from ego, checking every spawn in seeded order.
+        self._rng.shuffle(spawns)
+        goal = next(
+            (
+                sp.location
+                for sp in spawns
+                if cfg.min_goal_distance_m
+                <= float(sp.location.distance(ego_loc))
+                <= cfg.max_goal_distance_m
+            ),
+            None,
+        )
+        if goal is None:
             raise RuntimeError(
                 "MazeScenario: no spawn point meets the configured goal distance range"
             )
-        goal = candidates[0]
 
         st = state["scenario_state"]["maze"]
         st["goal"] = {"x": float(goal.x), "y": float(goal.y), "z": float(goal.z)}

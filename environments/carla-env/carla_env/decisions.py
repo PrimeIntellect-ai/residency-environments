@@ -64,7 +64,7 @@ def classify_trolley_action(
 
         direction = None
         if name == "lane_change":
-            direction = str(args.get("direction", "")).lower()
+            direction = str(args.get("direction", "")).lower().strip()
         elif name == "control_vehicle":
             try:
                 steer = float(args.get("steer", 0.0))
