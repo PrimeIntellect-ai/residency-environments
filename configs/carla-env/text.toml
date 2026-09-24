@@ -9,7 +9,8 @@ modality = "text"
 families = ["decision", "maze", "navigation", "free_roam"]
 seeds = [0, 1]
 
-# Prime sandboxes do not expose ports, so the tool server shares the agent's VM.
+# Tasks provision the agent's Prime VM from the runtime image, and the tool server
+# runs inside it because Prime sandboxes do not expose ports.
 [env.taskset.task.tools]
 colocated = true
 
@@ -18,12 +19,7 @@ id = "null"
 
 [env.agent.runtime]
 type = "prime"
-image = "sinatras/carla-env-runtime@sha256:602cc9ece967f16b73f4c809aa50ef7c7525a280ebbd1ef3d9f53634a0a23d23"
-workdir = "/home/carla"
 vm = true
-cpu = 4
-memory = 8
-disk = 40
 
 [env.agent.timeout]
 setup = 600

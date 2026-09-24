@@ -1,8 +1,8 @@
 """Native Verifiers v1 taskset for CARLA driving scenarios."""
 
-from .v1 import CarlaTaskset
+from .v1 import CarlaHarness, CarlaTaskset
 
-__all__ = ["CarlaTaskset"]
+__all__ = ["CarlaHarness", "CarlaTaskset"]
 
 
 def __getattr__(name: str):

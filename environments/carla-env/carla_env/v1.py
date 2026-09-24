@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 import verifiers.v1 as vf
 from pydantic import Field
+from verifiers.v1.harnesses.null import NullHarness
 
 from .decisions import decision_prompt, inaction_outcome
 from .procedural import procedural_inaction_outcome, procedural_prompt
@@ -47,15 +48,14 @@ SCENARIOS = tuple(
 )
 
 
+CARLA_WORKDIR = "/home/carla"
+CARLA_RESOURCES = vf.TaskResources(cpu=4, memory=8, disk=40)
+
+
 def _default_toolset_config() -> vf.ToolsetConfig:
-    return vf.ToolsetConfig(
-        runtime=vf.DockerConfig(
-            image=CARLA_RUNTIME_IMAGE,
-            workdir="/home/carla",
-            cpu=4,
-            memory=8,
-        )
-    )
+    # Prime sandboxes do not expose ports, so by default the tool server runs inside the
+    # agent's sandbox, which each task provisions from the runtime image.
+    return vf.ToolsetConfig(colocated=True)
 
 
 class CarlaState(vf.State):
@@ -140,6 +140,14 @@ class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
         return metrics
 
 
+class CarlaHarness(NullHarness):
+    """Default harness: the model acts only through the task's CARLA tools.
+
+    The colocated tool server shares the agent's sandbox, so a harness that executes
+    code there could reach the CARLA RPC port.
+    """
+
+
 class CarlaTasksetConfig(vf.TasksetConfig):
     modality: Literal["text", "vision"] = "text"
     scenario: str | None = None
@@ -214,6 +222,9 @@ class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
                 "Vision tasks require a local Docker tool runtime with gpu set; "
                 "use configs/carla-env/vision.toml."
             )
+        # A colocated tool server needs CARLA in the agent's sandbox; a separate tool
+        # runtime brings its own image instead.
+        colocated = self.config.task.tools.colocated
         for idx, (family, scenario, seed) in enumerate(self._task_specs()):
             yield CarlaTask(
                 CarlaTaskData(
@@ -226,6 +237,9 @@ class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
                     seed=seed,
                     modality=self.config.modality,
                     env_args=dict(self.config.env_args),
+                    image=CARLA_RUNTIME_IMAGE if colocated else None,
+                    workdir=CARLA_WORKDIR if colocated else None,
+                    resources=CARLA_RESOURCES if colocated else vf.TaskResources(),
                     network_allow=[],
                 ),
                 self.config.task,

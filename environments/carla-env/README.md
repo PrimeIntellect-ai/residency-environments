@@ -4,10 +4,10 @@ Native Verifiers v1 tasks for evaluating driving decisions, navigation, and expl
 
 The environment exposes one 19-task matrix in two observation modes:
 
-- `configs/carla-env/text.toml` runs the full matrix without rendering on Prime CPU VM sandboxes.
+- Text mode, the default, runs the full matrix without rendering on Prime CPU VM sandboxes. `configs/carla-env/text.toml` pins the same setup.
 - `configs/carla-env/vision.toml` runs the same matrix with RGB observations in a local GPU Docker runtime.
 
-Each rollout gets a task-scoped MCP tool server. The server starts CARLA in its runtime, owns the simulator connection, and exposes only the tools for the selected modality. In the vision config the tool server runs in its own Docker container, and the agent has no network access to the CARLA RPC server. Prime sandboxes do not expose ports, so the text config colocates the tool server with the agent program in one Prime VM built from the runtime image. The `null` harness can only call the MCP tools; a harness that executes code in that VM could reach the CARLA RPC port.
+Each rollout gets a task-scoped MCP tool server. The server starts CARLA in its runtime, owns the simulator connection, and exposes only the tools for the selected modality. In the vision config the tool server runs in its own Docker container, and the agent has no network access to the CARLA RPC server. Prime sandboxes do not expose ports, so by default each text task provisions the agent's Prime VM from the runtime image (4 CPU, 8 GB, 40 GB disk) and runs the tool server inside it. The default harness, `CarlaHarness`, is the tool-only `null` harness; a harness that executes code in that VM could reach the CARLA RPC port.
 
 ## Task matrix
 
@@ -61,6 +61,15 @@ Every reward in the matrix is in `[0, 1]`.
 - A rollout that never calls a tool scores `0.0` and reports `episode_started = 0`, the same as a rollout that never moves.
 - Prompts state the goal radius, the collision rule, and the coverage target, and are fixed per task; the simulator never injects prompt text into tool results.
 
+## From the Environments Hub
+
+```bash
+prime env install sinatras/carla-env
+uv run eval sinatras/carla-env -m <provider/model>
+```
+
+No config file is needed for text mode. Vision mode needs a local GPU Docker runtime, as in `configs/carla-env/vision.toml`.
+
 ## Install and inspect
 
 From the repository root:
@@ -88,7 +97,7 @@ The repository-level image definition bakes the package, its CARLA 0.10.0 client
 scripts/carla-env/build-image.sh sinatras/carla-env-runtime:0.10.0-v1
 ```
 
-The task configs and `CARLA_RUNTIME_IMAGE` pin the published runtime by its immutable manifest digest. The versioned tag above is retained only as the image build and publication target.
+`CARLA_RUNTIME_IMAGE` and the vision config pin the published runtime by its immutable manifest digest; text tasks carry the image in their task data. The versioned tag above is retained only as the image build and publication target.
 
 The tool server runs the copy of the package baked into the image, so any change under `carla_env/` requires rebuilding and republishing the image and bumping the digest before it takes effect.
 
