@@ -89,6 +89,8 @@ class MazeScenario(BaseScenario[MazeConfig]):
         d0 = float(goal.distance(ego_loc))
         st["initial_distance_m"] = d0
         st["best_distance_m"] = d0
+        st["reached"] = False
+        runtime.tick_listeners.append(lambda: self._update_progress(state))
         st["progress"] = 0.0
 
         info = state.get("info") if isinstance(state.get("info"), dict) else {}
@@ -129,6 +131,9 @@ class MazeScenario(BaseScenario[MazeConfig]):
         best = float(st.get("best_distance_m") or dist)
         best = min(best, dist)
         st["best_distance_m"] = best
+        # Latched per tick, so a goal crossed inside a long tool call still counts.
+        if dist <= float(self.config.success_radius_m):
+            st["reached"] = True
 
         d0 = st.get("initial_distance_m")
         if isinstance(d0, (int, float)) and d0 > 0:
@@ -144,9 +149,7 @@ class MazeScenario(BaseScenario[MazeConfig]):
         goal = self._current_goal_location(state)
         if goal is None:
             return True
-        runtime = state["carla"]
-        dist = float(goal.distance(runtime.ego_vehicle.get_location()))
-        if dist <= float(cfg.success_radius_m):
+        if state["scenario_state"]["maze"].get("reached"):
             return True
 
         return int(state.get("env_step", 0)) >= int(cfg.max_steps)
@@ -163,7 +166,7 @@ class MazeScenario(BaseScenario[MazeConfig]):
             if goal is not None
             else float("inf")
         )
-        reached = dist <= float(cfg.success_radius_m)
+        reached = bool(st.get("reached")) or dist <= float(cfg.success_radius_m)
 
         progress = float(st.get("progress", 0.0) or 0.0)
         reward = progress if not reached else 1.0

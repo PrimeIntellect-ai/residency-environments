@@ -124,6 +124,8 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         initial_distance = float(goal_spawn_location.distance(ego_location))
         navigation_state["initial_route_distance"] = initial_distance
         navigation_state["best_distance_m"] = initial_distance
+        navigation_state["goal_reached"] = False
+        runtime.tick_listeners.append(lambda: self._track_goal(state))
 
         available_spawns = [
             sp
@@ -247,10 +249,25 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         goal_loc = _coerce_goal_location(goal)
         return float(goal_loc.distance(ego_loc))
 
+    def _track_goal(self, state: Any) -> None:
+        """Record the closest approach and goal arrival between tool calls."""
+        navigation_state = state["scenario_state"]["navigation"]
+        distance = self._goal_distance(state)
+        best = navigation_state.get("best_distance_m")
+        navigation_state["best_distance_m"] = distance if best is None else min(best, distance)
+        if distance < float(self.config.success_radius):
+            navigation_state["goal_reached"] = True
+
+    def _goal_reached(self, state: Any) -> bool:
+        navigation_state = state.get("scenario_state", {}).get("navigation", {})
+        return bool(navigation_state.get("goal_reached")) or self._goal_distance(state) < float(
+            self.config.success_radius
+        )
+
     def is_done(self, state: Any) -> bool:
         if int(state.get("env_step", 0)) >= int(self.config.max_steps):
             return True
-        if self._goal_distance(state) < float(self.config.success_radius):
+        if self._goal_reached(state):
             return True
         runtime = state.get("carla")
         if runtime is not None and runtime.collision_sensor.collision_count > 0:
@@ -270,7 +287,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
 
         runtime = state.get("carla")
         collision = bool(runtime is not None and runtime.collision_sensor.collision_count > 0)
-        goal_reached = goal_distance < float(self.config.success_radius)
+        goal_reached = self._goal_reached(state)
         reward = 0.0 if collision else (1.0 if goal_reached else progress)
 
         outcome = {

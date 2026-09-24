@@ -18,7 +18,7 @@ id = "null"
 
 [env.agent.runtime]
 type = "prime"
-image = "sinatras/carla-env-runtime@sha256:e8593c615492d123413fcc0f3996a8b60b6754d32f8cb8facec349604eed46d5"
+image = "sinatras/carla-env-runtime@sha256:602cc9ece967f16b73f4c809aa50ef7c7525a280ebbd1ef3d9f53634a0a23d23"
 workdir = "/home/carla"
 vm = true
 cpu = 4
