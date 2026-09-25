@@ -15,7 +15,7 @@ from .procedural import procedural_inaction_outcome, procedural_prompt
 
 CARLA_RUNTIME_IMAGE = (
     "sinatras/carla-env-runtime@"
-    "sha256:cf242dcaafdfd16a85da65633a4cc7e9c187ed697166f1175ec224d98084d480"
+    "sha256:6e85ee2ce482bc3801a656784f328152a1777e28e12b52b155de28864021fe63"
 )
 
 ScenarioFamily = Literal["decision", "maze", "navigation", "free_roam"]
@@ -82,6 +82,7 @@ class CarlaTaskData(vf.TaskData):
     # the same layout.
     seed: int = 0
     env_args: dict[str, Any] = Field(default_factory=dict)
+    carla_startup_timeout_s: float = 180.0
 
 
 class CarlaTaskConfig(vf.TaskConfig):
@@ -158,6 +159,8 @@ class CarlaTasksetConfig(vf.TasksetConfig):
     # Procedural families yield one task per seed; decision tasks use the first seed.
     seeds: list[int] = Field(default_factory=lambda: [0, 1], min_length=1)
     env_args: dict[str, Any] = Field(default_factory=dict)
+    # Seconds CARLA may take to accept connections; 0 waits without a limit.
+    carla_startup_timeout_s: float = Field(default=180.0, ge=0)
     task: CarlaTaskConfig = Field(default_factory=CarlaTaskConfig)
 
 
@@ -237,6 +240,7 @@ class CarlaTaskset(vf.Taskset[CarlaTask, CarlaTasksetConfig]):
                     seed=seed,
                     modality=self.config.modality,
                     env_args=dict(self.config.env_args),
+                    carla_startup_timeout_s=self.config.carla_startup_timeout_s,
                     image=CARLA_RUNTIME_IMAGE if colocated else None,
                     workdir=CARLA_WORKDIR if colocated else None,
                     resources=CARLA_RESOURCES if colocated else vf.TaskResources(),

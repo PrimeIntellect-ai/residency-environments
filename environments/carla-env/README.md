@@ -61,6 +61,62 @@ Every reward in the matrix is in `[0, 1]`.
 - A rollout that never calls a tool scores `0.0` and reports `episode_started = 0`, the same as a rollout that never moves.
 - Prompts state the goal radius, the collision rule, and the coverage target, and are fixed per task; the simulator never injects prompt text into tool results.
 
+## Configuration
+
+`configs/carla-env/maze.toml` is a maze-only config with every option below written out.
+
+### Taskset (`[env.taskset]`)
+
+| Setting | Default | Alternatives |
+|---|---|---|
+| `modality` | `"text"` | `"vision"`, which needs a local GPU Docker tool runtime as in `configs/carla-env/vision.toml` |
+| `families` | all four | any subset of `"decision"`, `"maze"`, `"navigation"`, `"free_roam"` |
+| `scenario` | unset | one scenario name, such as `"maze"`; replaces `families` |
+| `seeds` | `[0, 1]` | any list of integers; maze, navigation, and free roam yield one task per seed, and the seed picks the start and the goal |
+| `env_args` | `{}` | the arguments below |
+| `carla_startup_timeout_s` | `180` | seconds the tool server waits for CARLA to accept connections; `0` waits without a limit |
+| `task.tools.colocated` | `true` | `false` with a separate `task.tools.runtime`, as in the vision config |
+
+### Environment arguments (`[env.taskset.env_args]`)
+
+| Argument | Default | Alternatives | Applies to |
+|---|---|---|---|
+| `max_steps` | maze 200, navigation and free roam 500, trolley micro 20, action bias 6 | any integer; `0` removes the cap | every scenario |
+| `max_sim_seconds` | no limit | seconds of simulated time; `0` means no limit | every scenario |
+| `max_wall_seconds` | no limit | seconds of wall-clock time from the first tool call; `0` means no limit | every scenario |
+| `max_route_steps` | `500` | simulator ticks per `follow_route` call; `0` removes the cap | maze, navigation, free roam |
+| `lane_change_max_s` | `3.0` | longest `lane_change` in seconds, at least `0.3`; `0` removes the cap | every scenario |
+| `trolley_micro_scoring` | `"expected"` | `"actual"`, which scores collision-sensor casualties | trolley micro |
+| `traffic_manager_enabled` | `false` | `true`; scenarios with NPC vehicles enable it regardless | navigation, free roam |
+| `tm_port` | CARLA default (8000) | any port | navigation, free roam |
+| `record_video` | `false` | `true`; needs a rendering CARLA, so it records only in vision mode | every scenario |
+| `video_output_dir` | `"_out"` | any directory in the tool runtime; the trace records the file as `video_path` | with `record_video` |
+| `connect_timeout_s` | `3.0` | seconds per connection attempt; `0` skips the TCP probe and uses `timeout_s` | every scenario |
+| `timeout_s` | `10.0` | seconds per CARLA RPC | every scenario |
+| `max_retries` | `20` | connection attempts | every scenario |
+| `log_level` | `"INFO"` | `"DEBUG"`, `"WARNING"`, `"ERROR"` | every scenario |
+
+The tool server sets `scenario`, `host`, `port`, `observation_mode`, and `seed` from the task, so they cannot be set here.
+
+The maze has no other settings. The hidden goal is a spawn point 80 to 300 m from the start, the success radius is 12 m, the ego starts at rest, and there is no traffic or pedestrians. Its tools are `control_vehicle`, `brake_vehicle`, `emergency_stop`, `lane_change`, `init_navigation_agent`, `set_destination`, `follow_route`, and `get_goal_info`, plus `observe` in text mode or `capture_image` in vision mode.
+
+### Episode limits
+
+An env step is one tool call. `max_steps`, `max_sim_seconds`, and `max_wall_seconds` end the episode the same way a goal or a collision does, so the rollout is scored and its outcome records the limit as `limit_reached`. Outcomes also record the simulated episode time as `sim_seconds`. `max_sim_seconds` stops the world at the limit, even inside a tool call, so the cutoff is the same on every run. After `max_wall_seconds`, further tool calls are not run.
+
+With every episode limit removed, a maze episode ends only when the ego reaches the goal or the agent stops calling tools. Action-bias and deadzone tasks still end at their decision deadline, because the deadline is part of how they are scored.
+
+### Agent limits (`[env.agent]`)
+
+These are verifiers settings, and all are unset by default.
+
+| Setting | Effect when reached |
+|---|---|
+| `max_turns` | Stops before the next model turn; the rollout is scored. |
+| `max_input_tokens`, `max_output_tokens`, `max_total_tokens` | Checked between turns, so the turn that crosses the limit completes; the rollout is scored. |
+| `sampling.max_tokens` | Caps each model response. |
+| `timeout.setup`, `timeout.rollout`, `timeout.finalize`, `timeout.scoring` | Fails the rollout without a score. The configs in `configs/carla-env/` set `setup`, `rollout`, and `finalize` only as safeguards; `maze.toml` leaves `rollout` unset. |
+
 ## From the Environments Hub
 
 ```bash
@@ -78,6 +134,7 @@ From the repository root:
 uv pip install -e ./environments/carla-env
 uv run eval @ configs/carla-env/text.toml --dry-run
 uv run eval @ configs/carla-env/vision.toml --dry-run
+uv run eval @ configs/carla-env/maze.toml --dry-run
 ```
 
 Run either configuration with a model override:

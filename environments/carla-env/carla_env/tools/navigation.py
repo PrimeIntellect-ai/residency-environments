@@ -8,6 +8,11 @@ import carla
 from ..core.agents import import_carla_agents
 from .vehicle import blocked_side_error
 
+# Per-call caps; load_environment can change or remove the maximums.
+DEFAULT_MAX_ROUTE_STEPS = 500
+DEFAULT_LANE_CHANGE_MAX_S = 3.0
+MIN_LANE_CHANGE_S = 0.3
+
 
 def _runtime(state: Any):
     rt = state.get("carla")
@@ -100,11 +105,14 @@ def follow_route(steps: int = 20, state: Any = None) -> str:
         n = int(steps)
     except Exception:
         n = 20
-    n = max(1, min(500, n))
+    cap = state.get("_max_route_steps", DEFAULT_MAX_ROUTE_STEPS)
+    n = max(1, n if cap is None else min(int(cap), n))
 
     done = False
     ticks_advanced = 0
     for _ in range(n):
+        if rt.time_limit_reached() is not None:
+            break
         try:
             if hasattr(agent, "done") and agent.done():
                 done = True
@@ -150,7 +158,8 @@ def lane_change(direction: str, duration_s: float = 1.2, state: Any = None) -> s
         dur = float(duration_s)
     except Exception:
         dur = 1.2
-    dur = max(0.3, min(3.0, dur))
+    max_s = state.get("_lane_change_max_s", DEFAULT_LANE_CHANGE_MAX_S)
+    dur = max(MIN_LANE_CHANGE_S, dur if max_s is None else min(float(max_s), dur))
 
     dt = float(getattr(rt.world.config, "fixed_delta_seconds", 0.05) or 0.05)
     ticks = max(1, int(dur / max(dt, 0.01)))

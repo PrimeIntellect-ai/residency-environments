@@ -10,7 +10,8 @@ class ScenarioConfig:
     name: str
     description: str
     seed: int | None = None
-    max_steps: int = 50
+    # Episode length cap in env steps (one per env_response call); None removes it.
+    max_steps: int | None = 50
     weather: str = "ClearNoon"
     # CARLA docker images can ship a reduced blueprint set; mkz is usually present.
     vehicle_blueprint: str = "vehicle.lincoln.mkz"
@@ -39,6 +40,10 @@ C = TypeVar("C", bound=ScenarioConfig)
 class BaseScenario(ABC, Generic[C]):
     def __init__(self, config: C):
         self.config: C = config
+
+    def step_limit_reached(self, state: Any) -> bool:
+        max_steps = self.config.max_steps
+        return max_steps is not None and int(state.get("env_step", 0)) >= int(max_steps)
 
     def supports_goal_info(self) -> bool:
         return False

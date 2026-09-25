@@ -21,6 +21,9 @@ id = "null"
 type = "prime"
 vm = true
 
+# Optional safeguard: an expired rollout timeout fails the rollout without a score.
+# To end episodes on time, set max_sim_seconds or max_wall_seconds in
+# env.taskset.env_args instead.
 [env.agent.timeout]
 setup = 600
 rollout = 600

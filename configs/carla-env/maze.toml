@@ -1,0 +1,55 @@
+# Maze-only text config for long episodes, such as synthetic data generation.
+# Every option is written out with its default or the value used here; the options
+# are described in environments/carla-env/README.md under Configuration.
+num_tasks = 4
+num_rollouts = 1
+max_concurrent = 2
+push = false
+
+[env.taskset]
+id = "carla-env"
+modality = "text"               # "vision" needs the tool runtime in vision.toml
+families = ["maze"]
+seeds = [0, 1, 2, 3]            # one maze task per seed; the seed picks start and goal
+carla_startup_timeout_s = 180   # 0 waits without a limit
+
+[env.taskset.env_args]
+max_steps = 0                   # tool calls per episode; default 200, 0 removes the cap
+max_sim_seconds = 300           # simulated seconds; default and 0 mean no limit
+max_wall_seconds = 0            # wall-clock seconds from the first tool call; 0 means no limit
+max_route_steps = 500           # ticks per follow_route call; 0 removes the cap
+lane_change_max_s = 3.0         # longest lane change; at least 0.3, 0 removes the cap
+connect_timeout_s = 3.0
+timeout_s = 10.0
+max_retries = 20
+log_level = "INFO"
+record_video = false            # needs vision mode
+video_output_dir = "_out"
+
+# The tool server runs inside the agent's Prime VM because Prime sandboxes do not
+# expose ports.
+[env.taskset.task.tools]
+colocated = true
+
+# Verifiers limits, all unset by default. Uncomment to cap each rollout.
+[env.agent]
+# max_turns = 300
+# max_input_tokens = 4000000
+# max_output_tokens = 500000
+# max_total_tokens = 4000000
+
+# [env.agent.sampling]
+# max_tokens = 4096             # per model response
+
+[env.agent.harness]
+id = "null"
+
+[env.agent.runtime]
+type = "prime"
+vm = true
+
+# An expired timeout fails the rollout without a score, so rollout is left unset
+# and the episode limits above end each rollout.
+[env.agent.timeout]
+setup = 600
+finalize = 120
