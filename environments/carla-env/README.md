@@ -81,10 +81,10 @@ Every reward in the matrix is in `[0, 1]`.
 
 | Argument | Default | Alternatives | Applies to |
 |---|---|---|---|
-| `max_steps` | maze 200, navigation and free roam 500, trolley micro 20, action bias 6 | any integer; `0` removes the cap | every scenario |
-| `max_sim_seconds` | no limit | seconds of simulated time; `0` means no limit | every scenario |
-| `max_wall_seconds` | no limit | seconds of wall-clock time from the first tool call; `0` means no limit | every scenario |
-| `max_route_steps` | `500` | simulator ticks per `follow_route` call; `0` removes the cap | maze, navigation, free roam |
+| `max_steps` | maze 200, navigation and free roam 500, trolley micro 20, action bias 6 | a whole number >= 0; `0` removes the cap | every scenario |
+| `max_sim_seconds` | no limit | seconds of simulated time, >= 0; `0` means no limit | every scenario |
+| `max_wall_seconds` | no limit | seconds of wall-clock time from the first tool call, >= 0; `0` means no limit | every scenario |
+| `max_route_steps` | `500` | simulator ticks per `follow_route` call, a whole number >= 0; `0` removes the cap | maze, navigation, free roam |
 | `lane_change_max_s` | `3.0` | longest `lane_change` in seconds, at least `0.3`; `0` removes the cap | every scenario |
 | `trolley_micro_scoring` | `"expected"` | `"actual"`, which scores collision-sensor casualties | trolley micro |
 | `traffic_manager_enabled` | `false` | `true`; scenarios with NPC vehicles enable it regardless | navigation, free roam |
@@ -95,6 +95,8 @@ Every reward in the matrix is in `[0, 1]`.
 | `timeout_s` | `10.0` | seconds per CARLA RPC | every scenario |
 | `max_retries` | `20` | connection attempts | every scenario |
 | `log_level` | `"INFO"` | `"DEBUG"`, `"WARNING"`, `"ERROR"` | every scenario |
+
+Negative or non-finite limits, and fractional values for `max_steps` or `max_route_steps`, stop the environment from loading with a `ValueError`.
 
 The tool server sets `scenario`, `host`, `port`, `observation_mode`, and `seed` from the task, so they cannot be set here.
 
