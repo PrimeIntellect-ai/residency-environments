@@ -1,0 +1,14 @@
+# Approved release choices and verified public dataset snapshot.
+code_license = "Apache-2.0"
+data_license = "CC-BY-4.0"
+dataset_repo = "seanpohorence/physim-worlds"
+exposure = "public-reference-development"
+
+dataset_revision = "1d8b73624669aea004befd54ec050bb7280f1678"
+release_id = "dataset-release:sha256:c1c96f192057c553478ec9522987a2de61c40f6cc9765a4ca97a065cb4148a06"
+published_date = "2026-09-15"
+
+[code_packages]
+physim = "https://github.com/swpo/physim/releases/download/physim-v0.12.2/physim-0.12.2-py3-none-any.whl#sha256=dee8ec2e19b0ab57531758c535b1838020f8c3f0f6c138ae9d1eeed61c45e57f"
+blobkit = "https://github.com/swpo/physim/releases/download/blobkit-v0.3.5/blobkit-0.3.5-py3-none-any.whl#sha256=6747e7ebe26e3909c05d91d050ebce93715d08992c51498cbf480b8206224331"
+source_commit = "eb6647cb429226dc43b27db6950329ed849b92d9"

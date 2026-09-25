@@ -1,0 +1,130 @@
+# R6 executable prediction contract — worked example v2
+
+You investigate an unfamiliar dynamical system using repeatable experiments,
+probe arrays, and a source. Your deliverable is Python code implementing:
+
+```python
+def predict(actions, queries, n_samples=64, seed=0):
+    return {"samples": [array_for_each_query]}
+```
+
+Use observations collected during exploration to build the predictor. You may
+package learned data and model parameters with it. Prediction runs use that
+artifact without access to the experimental service. The evaluator supplies new
+action/query programs, calls your predictor, then compares its outputs with one
+or more fresh physical realizations. The prediction programs are fixed in advance
+within each call; adaptive actions based on future readings are outside this API.
+
+## Experiments and time
+
+Each experiment starts from the same prepared physical state and apparatus poses
+at time0. Waiting is implicit in timestamps. Starting a new experiment restores
+that physical starting point. Ongoing random disturbances differ between
+experiments. Your task is to predict observable behavior, including meaningful
+uncertainty; reproducing those disturbances is not required or possible through
+the API. `seed` only controls your predictor's sampling.
+
+The local experimental service accepts the same `actions` and `queries` grammar
+as prediction, and returns one realization in the same `samples` structure. Both
+exploration and evaluation allow the ranges below. All times are absolute time
+units from the prepared start, nonnegative multiples of0.02 (representation
+tolerance1e-9). This example uses a maximum time of50. Each action's entire
+occupied interval must end by that maximum, even if all queries are earlier.
+
+The trusted host exposes `experiment(actions, queries)` and `usage()`. The
+development exploration budget is{max_experiments} experiments and{max_total_tu} integrated time units.
+Each admitted request consumes one experiment and its largest query timestamp
+in time units. Empty requests consume a call but no simulated time. Invalid
+requests consume neither; an admitted execution that fails retains its charge.
+`usage()` reports calls and time consumed and their configured limits. A pilot
+may set different budgets, which must be announced before exploration begins.
+
+## Actions
+
+An injection emits through one anonymous port at a fixed source location:
+
+```json
+{"t": 1.0, "kind": "inject", "port": {example_port}, "amp": 0.7, "dur": 4.0}
+```
+
+`port` is an integer0..{last_port}, amplitude is in[0,3], and duration is in(0,50]. The
+source is active on[t,t+dur). Its location stays fixed when probes move. Zero
+amplitude is permitted. Port identities are consistent across source and sensors.
+
+A probe adjustment changes one device's pose immediately:
+
+```json
+{"t": 2.0, "kind": "adjust", "device": 1, "u": [0.2, -0.4, 0.1]}
+```
+
+`device` is0 or1. Each of the three controls is a finite number in[-1,1]. Their
+mapping to translation and array dilation is initially unknown. Dilation clips
+at the apparatus bounds; a valid command at a bound is accepted. The adjustment
+occupies the shared adjustment lane for5 time units, regardless of its size.
+Probes are passive: movement changes where you observe, not the physical fields.
+
+Actions must be listed in strictly increasing start-time order. Simultaneous
+starts are unsupported. Two injection intervals cannot overlap; two adjustment
+intervals cannot overlap, including adjustments of different devices. Injection
+and adjustment intervals may overlap if their start times differ. Adjacent
+endpoints are permitted. A zero-effect command still occupies its declared lane.
+At each event time, the previous source interval ends, a starting action takes
+effect, then requested readings are taken. Intervals after the last query are
+validated but need not be simulated.
+
+## Queries and output
+
+```json
+[
+  {"sensor": "device0", "t": [0, 8, 12]},
+  {"sensor": "device1", "t": [12, 20]},
+  {"sensor": "global", "t": [20]}
+]
+```
+
+Every query returns all{n_ports} ports. `device0` has13 slots, `device1` has19, and
+`global` has2 (spatial mean, then spatial population variance). Device geometry,
+spatial coordinates, field meanings and governing equations are not supplied.
+
+For each query, return a numeric array with shape:
+
+```text
+(n_samples, number_of_requested_times, {n_ports}, number_of_sensor_slots)
+```
+
+Times within each query must be strictly increasing, with no duplicates.
+The same timestamp may appear in queries for different sensors. Each query's
+time list is independent; there is no ordering requirement between query objects.
+Preserve the input query order and each query's chronological time order.
+All values must be finite. No broadcasting, missing ports, extra keys, NaNs or
+infinities are accepted. A member index denotes one coherent predicted
+trajectory across every time, sensor and query in that call. Permuting whole
+members does not affect grading. Independently shuffling values at different
+times or devices changes the predicted joint behavior.
+
+A deterministic predictor may repeat its estimate in every member. A stochastic
+predictor may return an empirical distribution; it need not be Gaussian.
+Repeated calls with the same inputs and predictor seed must reproduce output.
+Predicted earlier behavior should not depend on adding later actions or queries.
+
+The protocol supports empty query/time lists with correspondingly empty outputs;
+graded examples always contain at least one observation. Exact object keys and
+JSON number types are required; booleans are not numbers or integer IDs.
+
+## Grading and operational limits
+
+The evaluator compares your empirical predictive distribution with independently
+simulated observations. It never pairs your member0 with physical member0.
+Marginal CRPS measures predicted scalar distributions; joint energy scores measure
+selected observable groups across times and sensor positions. Lower scores are
+better. Group definitions and scales are fixed before grading. There is no
+universal0–1 accuracy conversion or requirement to predict a microscopic noise
+path. The private phenomenon names and physical explanations are not inputs.
+
+The default request asks for64 predictive members; at most256 are accepted.
+The local evaluator caps128 actions,32 queries,256 times per query,1024 total
+query times,2,000,000 combined prediction/truth scalar outputs and100,000,000
+pairwise score operations. A request must satisfy every cap. Each pilot declares
+its model-response, experiment and submitted-artifact execution budgets before
+exploration. Submitted code runs in an isolated runtime with its frozen artifact
+and own observations; the physical service is unavailable during prediction.

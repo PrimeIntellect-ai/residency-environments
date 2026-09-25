@@ -1,0 +1,52 @@
+# Select the model on the CLI. This file selects one published preparation explicitly.
+# This configuration makes model API calls when executed.
+model = "YOUR_MODEL_ID"
+num_tasks = 1
+num_rollouts = 1
+max_concurrent = 1
+push = false
+
+[env.taskset]
+id = "physim"
+
+[env.taskset.task]
+output_root = "outputs/r6/artifacts"
+agent_image = "physim-agent:0.12.2"
+
+[env.taskset.task.tools]
+max_experiments = 1000
+max_total_tu = 50000
+max_validation_attempts = 128
+max_submission_attempts = 128
+
+[env.agent]
+# Generous exploration defaults; increase these together for longer investigations.
+max_turns = 1024
+max_output_tokens = 1048576
+
+[env.agent.timeout]
+rollout = 86400
+
+[env.agent.harness]
+id = "bash"
+edit = true
+search = false
+
+[env.agent.runtime]
+type = "docker"
+image = "physim-agent:0.12.2"
+workdir = "/workspace"
+cpu = 4
+memory = 8
+allow = []
+
+[env.agent.retries]
+max_retries = 0
+
+[env.retries]
+max_retries = 0
+
+[env.taskset.task.tools.bundle_source]
+repo = "seanpohorence/physim-worlds"
+revision = "dcd6abd5eae76a47f326c70518315d2d1e101d86"
+path = "bundles/xv_rotor_lab/8e711a8a0ea1b52985d6598d3093c15e6024058b9ee9ab5134917beabeccf4a6"
