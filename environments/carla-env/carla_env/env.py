@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import math
 import os
 import random
 import re
@@ -56,6 +57,11 @@ from .tools import (
     lane_change,
     observe,
     set_destination,
+)
+from .tools.navigation import (
+    DEFAULT_LANE_CHANGE_MAX_S,
+    DEFAULT_MAX_ROUTE_STEPS,
+    MIN_LANE_CHANGE_S,
 )
 
 logger = get_logger("env")
@@ -258,6 +264,13 @@ class CarlaEnvConfig:
     traffic_manager_enabled: bool = False
     # TrafficManager port. None means use CARLA default (8000).
     tm_port: int | None = None
+
+    # Episode time limits in simulated and wall-clock seconds; None removes them.
+    max_sim_seconds: float | None = None
+    max_wall_seconds: float | None = None
+    # Per-call caps on follow_route ticks and lane_change duration; None removes them.
+    max_route_steps: int | None = DEFAULT_MAX_ROUTE_STEPS
+    lane_change_max_s: float | None = DEFAULT_LANE_CHANGE_MAX_S
 
     def __post_init__(self) -> None:
         if not self.host:
@@ -819,6 +832,8 @@ class CarlaEnv:
             state["trolley_micro_scoring"] = self.config.trolley_micro_scoring
             state["rubric_rewards"] = []
             state["_vision_only"] = bool(getattr(scenario.config, "vision_only", False))
+            state["_max_route_steps"] = self.config.max_route_steps
+            state["_lane_change_max_s"] = self.config.lane_change_max_s
             rl_rubric = rubric_for_scenario(scenario)
             rl_rubric.reset()
             state["_rl_rubric"] = rl_rubric
@@ -860,6 +875,10 @@ class CarlaEnv:
         scenario = self.scenario
         runtime: CarlaRuntime = state["carla"]
 
+        # Episode time limits count from the first tool call, not from setup.
+        if not runtime.clock_started:
+            runtime.start_episode_clock(self.config.max_sim_seconds, self.config.max_wall_seconds)
+
         tool_messages: Messages = []
         emitted_obs_via_tool = False
         turn_advanced_time = False
@@ -891,6 +910,17 @@ class CarlaEnv:
                     or "{}"
                 )
                 tool_call_id = getattr(tc, "id", "") or getattr(tc, "tool_call_id", "") or ""
+
+            expired = runtime.time_limit_reached()
+            if expired is not None:
+                tool_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": f"Error: the episode reached {expired}; the call was not run",
+                    }
+                )
+                continue
 
             try:
                 parsed = json.loads(arg_str) if arg_str else {}
@@ -1068,10 +1098,19 @@ class CarlaEnv:
             except Exception:
                 pass
 
+        # A scenario ending (goal, collision, decision deadline) takes precedence over a limit.
+        limit = None
         if scenario.is_done(state):
             state["done"] = True
-        elif int(state.get("env_step", 0)) >= int(getattr(scenario.config, "max_steps", 500)):
+        elif scenario.step_limit_reached(state):
+            limit = "max_steps"
+        else:
+            limit = runtime.time_limit_reached()
+        outcome = state.setdefault("scenario_outcome", {})
+        outcome["sim_seconds"] = runtime.sim_seconds
+        if limit is not None:
             state["done"] = True
+            outcome["limit_reached"] = limit
 
         # Build env messages for this turn (tool messages + optional observation).
         env_messages: Messages = list(tool_messages)
@@ -1150,6 +1189,19 @@ class CarlaEnv:
             state.pop("_rl_rubric", None)
 
 
+def _optional_limit(name: str, value: float, cast: type) -> Any:
+    """Validate a user limit: 0 removes it; negative or non-finite values are rejected,
+    and so are fractional values for counts."""
+    kind = "a whole number" if cast is int else "a finite number"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be {kind} >= 0 (0 removes the limit)") from None
+    if not math.isfinite(number) or number < 0 or (cast is int and not number.is_integer()):
+        raise ValueError(f"{name} must be {kind} >= 0 (0 removes the limit)")
+    return cast(number) or None
+
+
 def load_environment(
     scenario: str = "action_bias_saves",
     host: str | None = None,
@@ -1165,6 +1217,11 @@ def load_environment(
     record_video: bool | None = None,
     video_output_dir: str | None = None,
     seed: int | None = None,
+    max_steps: int | None = None,
+    max_sim_seconds: float | None = None,
+    max_wall_seconds: float | None = None,
+    max_route_steps: int | None = None,
+    lane_change_max_s: float | None = None,
     **kwargs,
 ) -> CarlaEnv:
     """
@@ -1195,6 +1252,21 @@ def load_environment(
         video_output_dir: Output directory for episode recordings.
         seed: Seeds spawn selection, scenario randomness, and CARLA pedestrian and
             traffic manager randomness, so repeated sessions get the same layout.
+        max_steps: Episode length cap in env steps, one per ``env_response`` call; the
+            v1 tool server makes one call per tool call. ``None`` keeps the scenario
+            default (maze 200, navigation and free roam 500, trolley micro 20, action
+            bias 6); ``0`` removes the cap. Action-bias and deadzone tasks still end at
+            their decision deadline, which is part of how they are scored.
+        max_sim_seconds: End the episode after this much simulated time. The world
+            stops advancing at the limit, even inside a tool call. ``None`` or ``0``
+            means no limit.
+        max_wall_seconds: End the episode after this much wall-clock time from the
+            first tool call. Tool calls after the limit are not run. ``None`` or ``0``
+            means no limit.
+        max_route_steps: Most simulator ticks one ``follow_route`` call may drive.
+            ``None`` keeps 500; ``0`` removes the cap.
+        lane_change_max_s: Longest ``lane_change`` duration in seconds. ``None`` keeps
+            3.0; ``0`` removes the cap. Lane changes always take at least 0.3 s.
     """
     if kwargs:
         names = ", ".join(sorted(kwargs))
@@ -1207,6 +1279,8 @@ def load_environment(
 
     scenario_obj = _make_scenario(scenario)
     scenario_obj.config.seed = seed
+    if max_steps is not None:
+        scenario_obj.config.max_steps = _optional_limit("max_steps", max_steps, int)
 
     if observation_mode is not None:
         mode = str(observation_mode).strip().lower()
@@ -1232,5 +1306,15 @@ def load_environment(
         tm_port=tm_port,
         seed=seed,
     )
+    if max_sim_seconds is not None:
+        cfg.max_sim_seconds = _optional_limit("max_sim_seconds", max_sim_seconds, float)
+    if max_wall_seconds is not None:
+        cfg.max_wall_seconds = _optional_limit("max_wall_seconds", max_wall_seconds, float)
+    if max_route_steps is not None:
+        cfg.max_route_steps = _optional_limit("max_route_steps", max_route_steps, int)
+    if lane_change_max_s is not None:
+        cfg.lane_change_max_s = _optional_limit("lane_change_max_s", lane_change_max_s, float)
+        if cfg.lane_change_max_s is not None and cfg.lane_change_max_s < MIN_LANE_CHANGE_S:
+            raise ValueError(f"lane_change_max_s must be 0 or at least {MIN_LANE_CHANGE_S}")
 
     return CarlaEnv(config=cfg, scenario=scenario_obj)

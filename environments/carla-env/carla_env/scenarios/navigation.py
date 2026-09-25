@@ -68,7 +68,7 @@ class NavigationConfig(ScenarioConfig):
     goal_location: Optional[Tuple[float, float, float]] = None
     route_distance_min: float = 100.0
     route_distance_max: float = 500.0
-    max_steps: int = 500
+    max_steps: int | None = 500
     auto_observe: bool = True
     idle_ticks: int = 1
     enable_vision: bool = False
@@ -265,8 +265,6 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         )
 
     def is_done(self, state: Any) -> bool:
-        if int(state.get("env_step", 0)) >= int(self.config.max_steps):
-            return True
         if self._goal_reached(state):
             return True
         runtime = state.get("carla")

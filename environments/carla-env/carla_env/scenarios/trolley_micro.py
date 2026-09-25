@@ -197,9 +197,8 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
         runtime = state["carla"]
         if runtime.collision_sensor.collision_count > 0:
             return True
-        step = int(state.get("env_step", 0))
         # Deadzone variants allow a single decision turn, as in action-bias deadzones.
-        return step >= (1 if self.config.deadzone else int(self.config.max_steps))
+        return bool(self.config.deadzone) and int(state.get("env_step", 0)) >= 1
 
     def compute_outcome(self, state: Any) -> Dict[str, Any]:
         runtime = state["carla"]
