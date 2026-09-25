@@ -15,7 +15,7 @@ from .procedural import procedural_inaction_outcome, procedural_prompt
 
 CARLA_RUNTIME_IMAGE = (
     "sinatras/carla-env-runtime@"
-    "sha256:602cc9ece967f16b73f4c809aa50ef7c7525a280ebbd1ef3d9f53634a0a23d23"
+    "sha256:6e065ae4719f38ae6cf526516f66a7282ba7ff3f14432249cb504609044b4ee5"
 )
 
 ScenarioFamily = Literal["decision", "maze", "navigation", "free_roam"]

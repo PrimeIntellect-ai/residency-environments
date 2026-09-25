@@ -61,6 +61,8 @@ from .tools import (
 logger = get_logger("env")
 
 Messages = list[dict[str, Any]]
+# Ticks that render freshly spawned actors before the episode starts (visible from ~5).
+RENDER_WARMUP_TICKS = 10
 State = dict[str, Any]
 
 
@@ -651,8 +653,13 @@ class CarlaEnv:
         )
         state["carla"] = runtime
 
-        self._setup_initial_velocity(scenario, ego, state)
         scenario.setup(state)
+        # Newly spawned actors take a few rendered frames to appear in camera images, so
+        # render them with the ego still before it starts moving toward them.
+        if camera_sensor is not None:
+            for _ in range(RENDER_WARMUP_TICKS):
+                world_mgr.tick()
+        self._setup_initial_velocity(scenario, ego, state)
 
         # Start recording only after scenario setup succeeds, so failed spawn
         # retries don't leak writer threads and temp directories.

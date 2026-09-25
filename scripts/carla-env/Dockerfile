@@ -14,6 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# The NVIDIA container toolkit injects the driver's Vulkan and EGL libraries but not their
+# loader manifests; without them -RenderOffScreen finds no GPU and exits.
+RUN mkdir -p /etc/vulkan/icd.d /usr/share/glvnd/egl_vendor.d \
+    && printf '{"file_format_version": "1.0.1", "ICD": {"library_path": "libGLX_nvidia.so.0", "api_version": "1.3.0"}}\n' \
+        > /etc/vulkan/icd.d/nvidia_icd.json \
+    && printf '{"file_format_version": "1.0.0", "ICD": {"library_path": "libEGL_nvidia.so.0"}}\n' \
+        > /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+
 RUN curl -LsSf https://astral.sh/uv/0.8.15/install.sh | sh \
     && install -m 0755 /root/.local/bin/uv /usr/local/bin/uv \
     && install -m 0755 /root/.local/bin/uvx /usr/local/bin/uvx \
