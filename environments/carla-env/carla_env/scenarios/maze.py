@@ -174,6 +174,7 @@ class MazeScenario(BaseScenario[MazeConfig]):
         outcome = {
             "scenario": cfg.name,
             "distance_to_goal_m": dist,
+            "closest_goal_distance_m": float(st.get("best_distance_m") or dist),
             "progress": progress,
             "reached_goal": bool(reached),
             "reward": float(reward),

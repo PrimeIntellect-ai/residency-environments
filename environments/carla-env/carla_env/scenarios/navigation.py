@@ -294,6 +294,7 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
             "scenario": self.config.name,
             "goal_reached": goal_reached,
             "goal_distance": float(goal_distance),
+            "closest_goal_distance_m": float(best_distance),
             "collision": collision,
             "progress": progress,
             "reward": float(reward),

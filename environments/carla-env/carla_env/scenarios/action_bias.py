@@ -170,6 +170,7 @@ class ActionBiasScenario(BaseScenario[ActionBiasConfig]):
                     )
                 total_side_spawned += spawn_group(side_wp, int(cfg.side_count))
         self._side_dirs = list(side_dirs)
+        state["_no_lane_sides"] = [s for s in ("left", "right") if s not in side_dirs]
 
         # Store scenario metadata in state.
         info_side_dirs = list(self._side_dirs)

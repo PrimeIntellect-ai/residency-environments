@@ -14,7 +14,7 @@ colocated = false
 
 [env.taskset.task.tools.runtime]
 type = "docker"
-image = "sinatras/carla-env-runtime@sha256:6e065ae4719f38ae6cf526516f66a7282ba7ff3f14432249cb504609044b4ee5"
+image = "sinatras/carla-env-runtime@sha256:cf242dcaafdfd16a85da65633a4cc7e9c187ed697166f1175ec224d98084d480"
 workdir = "/home/carla"
 cpu = 4
 memory = 8

@@ -6,6 +6,7 @@ from typing import Any
 import carla
 
 from ..core.agents import import_carla_agents
+from .vehicle import blocked_side_error
 
 
 def _runtime(state: Any):
@@ -141,6 +142,9 @@ def lane_change(direction: str, duration_s: float = 1.2, state: Any = None) -> s
     d = str(direction or "").lower().strip()
     if d not in {"left", "right"}:
         return "Error: direction must be 'left' or 'right'"
+    error = blocked_side_error(state, d)
+    if error:
+        return error
 
     try:
         dur = float(duration_s)

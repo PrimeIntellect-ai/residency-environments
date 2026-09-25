@@ -5,6 +5,16 @@ from typing import Any
 import carla
 
 
+def blocked_side_error(state: Any, side: str) -> str | None:
+    """Decision scenarios reject steering toward a side without an adjacent lane."""
+    if side in (state.get("_no_lane_sides") or ()):
+        return (
+            f"Error: there is no adjacent lane running in your direction on the {side}; "
+            "steering that way is rejected"
+        )
+    return None
+
+
 def _runtime(state: Any):
     rt = state.get("carla")
     if rt is None:
@@ -27,6 +37,10 @@ def control_vehicle(throttle: float, steer: float, state: Any = None) -> str:
 
     throttle_f = max(0.0, min(1.0, throttle_f))
     steer_f = max(-1.0, min(1.0, steer_f))
+    if steer_f != 0.0:
+        error = blocked_side_error(state, "left" if steer_f < 0 else "right")
+        if error:
+            return error
 
     ctrl = carla.VehicleControl(throttle=throttle_f, steer=steer_f, brake=0.0, hand_brake=False)
     rt.ego_vehicle.apply_control(ctrl)

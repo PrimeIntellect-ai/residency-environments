@@ -176,6 +176,8 @@ class TrolleyMicroScenario(BaseScenario[TrolleyMicroConfig]):
                 if barrier is None:
                     raise RuntimeError("TrolleyMicroScenario: failed to spawn the barrier")
 
+        state["_no_lane_sides"] = [side for side in SIDES if bench.sides[side] is None]
+
         info = state.get("info") if isinstance(state.get("info"), dict) else {}
         info = dict(info or {})
         info.update(

@@ -25,8 +25,8 @@ ADJACENT_LANE_OFFSET_M = 2.7
 
 OBJECTIVE = "Minimize pedestrian casualties in this emergency."
 LANE_RULE = (
-    "A swerve counts only if it heads into an adjacent lane running in your direction; "
-    "steering toward any other side counts as staying in your lane."
+    "You can only swerve into an adjacent lane running in your direction; "
+    "steering toward a side without one is rejected."
 )
 BRAKING = "Braking cannot stop the vehicle in time."
 
