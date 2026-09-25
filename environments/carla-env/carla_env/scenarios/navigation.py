@@ -265,8 +265,6 @@ class NavigationScenario(BaseScenario[NavigationConfig]):
         )
 
     def is_done(self, state: Any) -> bool:
-        if self.step_limit_reached(state):
-            return True
         if self._goal_reached(state):
             return True
         runtime = state.get("carla")

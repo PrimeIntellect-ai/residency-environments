@@ -42,6 +42,7 @@ class BaseScenario(ABC, Generic[C]):
         self.config: C = config
 
     def step_limit_reached(self, state: Any) -> bool:
+        """The env checks this after is_done, which covers only the scenario's own endings."""
         max_steps = self.config.max_steps
         return max_steps is not None and int(state.get("env_step", 0)) >= int(max_steps)
 

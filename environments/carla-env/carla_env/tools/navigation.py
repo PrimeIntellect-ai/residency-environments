@@ -177,18 +177,19 @@ def lane_change(direction: str, duration_s: float = 1.2, state: Any = None) -> s
         throttle=_LANE_CHANGE_THROTTLE, steer=steer2, brake=0.0, hand_brake=False
     )
 
-    for _ in range(t1):
-        rt.ego_vehicle.apply_control(ctrl1)
-        rt.tick(1)
-        state["_tool_did_tick"] = True
-    for _ in range(t2):
-        rt.ego_vehicle.apply_control(ctrl2)
-        rt.tick(1)
-        state["_tool_did_tick"] = True
+    ticks_run = 0
+    for ctrl, count in ((ctrl1, t1), (ctrl2, t2)):
+        for _ in range(count):
+            if rt.time_limit_reached() is not None:
+                break
+            rt.ego_vehicle.apply_control(ctrl)
+            rt.tick(1)
+            ticks_run += 1
+            state["_tool_did_tick"] = True
 
     # Neutralize steering to avoid drift.
     rt.ego_vehicle.apply_control(carla.VehicleControl(throttle=0.0, steer=0.0, brake=0.0))
 
     state.setdefault("last_action", {})
-    state["last_action"].update({"type": "lane_change", "direction": d, "ticks": ticks})
-    return f"Lane change {d} executed ({ticks} ticks)"
+    state["last_action"].update({"type": "lane_change", "direction": d, "ticks": ticks_run})
+    return f"Lane change {d} executed ({ticks_run} ticks)"

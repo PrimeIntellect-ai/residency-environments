@@ -80,11 +80,12 @@ class CarlaRuntime:
                 break
             if self.tick_hook is not None:
                 result = self.tick_hook()
-                if isinstance(result, int):
-                    frame = result
+                frame = result if isinstance(result, int) else 0
             else:
                 frame = self.world.tick()
-            self.episode_ticks += 1
+            # A failed tick returns frame 0 and does not advance the episode clock.
+            if frame:
+                self.episode_ticks += 1
             for listener in self.tick_listeners:
                 listener()
         return frame

@@ -148,10 +148,7 @@ class MazeScenario(BaseScenario[MazeConfig]):
         goal = self._current_goal_location(state)
         if goal is None:
             return True
-        if state["scenario_state"]["maze"].get("reached"):
-            return True
-
-        return self.step_limit_reached(state)
+        return bool(state["scenario_state"]["maze"].get("reached"))
 
     def compute_outcome(self, state: Any) -> Dict[str, Any]:
         cfg = self.config

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import math
 import os
 import random
 import re
@@ -863,7 +864,6 @@ class CarlaEnv:
                     {"role": "user", "content": f"Episode start.\n\n{obs.text}"},
                 ]
 
-            runtime.start_episode_clock(self.config.max_sim_seconds, self.config.max_wall_seconds)
             return state
         except BaseException:
             await self._cleanup_failed_setup(state, actors, world_mgr)
@@ -874,6 +874,11 @@ class CarlaEnv:
 
         scenario = self.scenario
         runtime: CarlaRuntime = state["carla"]
+
+        # Episode time limits count from the first tool call, not from setup.
+        if not state.get("_episode_clock_started"):
+            runtime.start_episode_clock(self.config.max_sim_seconds, self.config.max_wall_seconds)
+            state["_episode_clock_started"] = True
 
         tool_messages: Messages = []
         emitted_obs_via_tool = False
@@ -1094,6 +1099,7 @@ class CarlaEnv:
             except Exception:
                 pass
 
+        # A scenario ending (goal, collision, decision deadline) takes precedence over a limit.
         limit = None
         if scenario.is_done(state):
             state["done"] = True
@@ -1185,11 +1191,16 @@ class CarlaEnv:
 
 
 def _optional_limit(name: str, value: float, cast: type) -> Any:
-    """Validate a user limit: 0 removes it, negative values are rejected."""
-    limit = cast(value)
-    if limit < 0:
-        raise ValueError(f"{name} must be >= 0 (0 removes the limit)")
-    return limit or None
+    """Validate a user limit: 0 removes it; negative or non-finite values are rejected,
+    and so are fractional values for counts."""
+    kind = "a whole number" if cast is int else "a finite number"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be {kind} >= 0 (0 removes the limit)") from None
+    if not math.isfinite(number) or number < 0 or (cast is int and not number.is_integer()):
+        raise ValueError(f"{name} must be {kind} >= 0 (0 removes the limit)")
+    return cast(number) or None
 
 
 def load_environment(
@@ -1251,7 +1262,7 @@ def load_environment(
             stops advancing at the limit, even inside a tool call. ``None`` or ``0``
             means no limit.
         max_wall_seconds: End the episode after this much wall-clock time from the
-            episode start. Tool calls after the limit are not run. ``None`` or ``0``
+            first tool call. Tool calls after the limit are not run. ``None`` or ``0``
             means no limit.
         max_route_steps: Most simulator ticks one ``follow_route`` call may drive.
             ``None`` keeps 500; ``0`` removes the cap.

@@ -160,8 +160,6 @@ class FreeRoamScenario(NavigationScenario):
         state["info"] = info
 
     def is_done(self, state: Any) -> bool:
-        if self.step_limit_reached(state):
-            return True
         # End on collision to prevent crashed policies from recovering reward.
         runtime = state.get("carla")
         if runtime is not None and self._distinct_collision_count(runtime) > 0:
