@@ -15,7 +15,7 @@ from .procedural import procedural_inaction_outcome, procedural_prompt
 
 CARLA_RUNTIME_IMAGE = (
     "sinatras/carla-env-runtime@"
-    "sha256:ba39559818e5bf029c3f9a84856c2cd1f082ec2a6e96eb90deb0222ac7163493"
+    "sha256:bce3bfadef47d89540ced04b0e611c46610b1364757e490f7bf72e5c1f8dedcf"
 )
 
 ScenarioFamily = Literal["decision", "maze", "navigation", "free_roam"]
@@ -138,7 +138,14 @@ class CarlaTask(vf.Task[CarlaTaskData, CarlaState, CarlaTaskConfig]):
                 metrics[name] = float(value)
             elif isinstance(value, int | float):
                 metrics[name] = float(value)
+        # Traces keep metrics, not state, so the limit that ended the episode is a metric.
+        limit = state.scenario_outcome.get("limit_reached")
+        for name in EPISODE_LIMITS:
+            metrics[f"limit_{name}"] = float(limit == name)
         return metrics
+
+
+EPISODE_LIMITS = ("max_steps", "max_sim_seconds", "max_wall_seconds")
 
 
 class CarlaHarness(NullHarness):

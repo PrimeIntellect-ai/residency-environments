@@ -102,7 +102,7 @@ The maze has no other settings. The hidden goal is a spawn point 80 to 300 m fro
 
 ### Episode limits
 
-An env step is one tool call. `max_steps`, `max_sim_seconds`, and `max_wall_seconds` end the episode the same way a goal or a collision does, so the rollout is scored and its outcome records the limit as `limit_reached`. Outcomes also record the simulated episode time as `sim_seconds`. `max_sim_seconds` stops the world at the limit, even inside a tool call, so the cutoff is the same on every run. After `max_wall_seconds`, further tool calls are not run.
+An env step is one tool call. `max_steps`, `max_sim_seconds`, and `max_wall_seconds` end the episode the same way a goal or a collision does, so the rollout is scored and its outcome records the limit as `limit_reached`. The metrics `limit_max_steps`, `limit_max_sim_seconds`, and `limit_max_wall_seconds` are `1` for the limit that ended the episode and `0` otherwise. Outcomes also record the simulated episode time as `sim_seconds`. `max_sim_seconds` stops the world at the limit, even inside a tool call, so the cutoff is the same on every run. After `max_wall_seconds`, further tool calls are not run.
 
 With every episode limit removed, a maze episode ends only when the ego reaches the goal or the agent stops calling tools. Action-bias and deadzone tasks still end at their decision deadline, because the deadline is part of how they are scored.
 

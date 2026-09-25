@@ -38,6 +38,7 @@ class CarlaRuntime:
     # Called after every tick, so scenarios can sample the ego path inside long tool calls.
     tick_listeners: list[Callable[[], None]] = field(default_factory=list)
     # Episode clock, started by start_episode_clock; None limits are off.
+    clock_started: bool = False
     episode_ticks: int = 0
     max_episode_ticks: int | None = None
     wall_deadline: float | None = None
@@ -54,6 +55,7 @@ class CarlaRuntime:
     def start_episode_clock(
         self, max_sim_seconds: float | None, max_wall_seconds: float | None
     ) -> None:
+        self.clock_started = True
         self.episode_ticks = 0
         self.max_episode_ticks = (
             None

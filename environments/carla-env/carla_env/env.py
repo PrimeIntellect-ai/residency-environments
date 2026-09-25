@@ -876,9 +876,8 @@ class CarlaEnv:
         runtime: CarlaRuntime = state["carla"]
 
         # Episode time limits count from the first tool call, not from setup.
-        if not state.get("_episode_clock_started"):
+        if not runtime.clock_started:
             runtime.start_episode_clock(self.config.max_sim_seconds, self.config.max_wall_seconds)
-            state["_episode_clock_started"] = True
 
         tool_messages: Messages = []
         emitted_obs_via_tool = False

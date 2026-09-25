@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "carla-env"
-version = "0.4.4"
+version = "0.4.5"
 description = "CARLA 0.10.0 text and vision driving taskset for Verifiers"
 readme = "README.md"
 authors = [{ name = "Sinatras" }]
