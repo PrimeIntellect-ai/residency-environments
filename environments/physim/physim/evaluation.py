@@ -1,6 +1,6 @@
 """Public interface validation and bundle-driven evaluation.
 
-Submitted code runs only in Docker. Forecasts are frozen before truth arrays load.
+Submitted code runs only in isolated container runtimes. Forecasts are frozen before truth arrays load.
 """
 
 import json
@@ -15,8 +15,9 @@ from . import blobround6_eval as E
 from .artifact_store import snapshot_artifact
 from .bundles import Bundle, BundleError, identified, load_arrays
 from .bundles import digest as file_digest
-from .sandbox import IMAGE, ExecutionLimits, Sandbox, SandboxError, SandboxInfrastructureError
-from .sandbox import docker as docker
+from .runtime_sandbox import PUBLIC_IMAGE as IMAGE
+from .runtime_sandbox import RuntimeSandbox as Sandbox
+from .sandbox import ExecutionLimits, SandboxError, SandboxInfrastructureError
 
 LIMITS = replace(E.DEFAULT_LIMITS, max_horizon_tu=50.0)
 
@@ -90,7 +91,9 @@ def public_validation_cases(protocol=E.R6.APPARATUS_PROTOCOL):
     return cases
 
 
-def validate_predictor(artifact, observations, *, roster=E.DEFAULT_ROSTER, execution_limits=None):
+def validate_predictor(
+    artifact, observations, *, roster=E.DEFAULT_ROSTER, execution_limits=None, sandbox_factory=Sandbox
+):
     """Run the public v5 gate; model code executes only inside Sandbox."""
     cases = public_validation_cases(roster.protocol)
     report = dict(
@@ -104,7 +107,7 @@ def validate_predictor(artifact, observations, *, roster=E.DEFAULT_ROSTER, execu
         public_roster=dict(n_ports=roster.n_ports, device_slots=list(roster.device_slots)),
     )
     options = {} if execution_limits is None else {"limits": execution_limits}
-    box = Sandbox(observations, artifact=artifact, **options)
+    box = sandbox_factory(observations, artifact=artifact, **options)
     if execution_limits is not None:
         report["execution_limits"] = asdict(execution_limits)
     baseline = None
@@ -269,7 +272,9 @@ def _forecast_suite(bundle, output, predict, *, members, predictor):
                     execution=execution,
                 )
             )
-        except Exception as exc:
+        except SandboxInfrastructureError:
+            raise
+        except (SandboxError, E.EvaluationError, ValueError, TypeError) as exc:
             failures.append(dict(case_id=case["id"], error_type=type(exc).__name__, error=str(exc)[:3000]))
     dump(
         forecast_dir / "manifest.json",
@@ -321,8 +326,19 @@ def _snapshot_inputs(source, target, *, observations=False, limits=None):
     return rows
 
 
-def grade(artifact, observations, output, *, bundle, members=64, run_context=None, execution_limits=None):
-    """Freeze public inputs, then grade submitted code exclusively in Docker."""
+def grade(
+    artifact,
+    observations,
+    output,
+    *,
+    bundle,
+    members=64,
+    run_context=None,
+    execution_limits=None,
+    sandbox_factory=Sandbox,
+    predictor_image=IMAGE,
+):
+    """Freeze public inputs, then grade submitted code exclusively in isolated runtimes."""
     import tempfile
 
     if not isinstance(bundle, Bundle):
@@ -331,7 +347,7 @@ def grade(artifact, observations, output, *, bundle, members=64, run_context=Non
         root = Path(directory)
         predictor = dict(
             kind="submitted-artifact",
-            image=IMAGE,
+            image=predictor_image,
             run_context=run_context,
             execution_limits=asdict(execution_limits) if execution_limits is not None else None,
             files=_snapshot_inputs(artifact, root / "artifact", limits=execution_limits),
@@ -342,7 +358,7 @@ def grade(artifact, observations, output, *, bundle, members=64, run_context=Non
 
         def predict(case, count, seed):
             options = {} if execution_limits is None else {"limits": execution_limits}
-            box = Sandbox(root / "observations", artifact=root / "artifact", **options)
+            box = sandbox_factory(root / "observations", artifact=root / "artifact", **options)
             try:
                 return read_prediction(
                     box, case["actions"], case["queries"], members=count, seed=seed, roster=bundle.roster

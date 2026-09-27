@@ -11,7 +11,7 @@ id = "physim"
 
 [env.taskset.task]
 output_root = "outputs/r6/artifacts"
-agent_image = "physim-agent:0.12.2"
+agent_image = "python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93"
 
 [env.taskset.task.tools]
 max_experiments = 1000
@@ -33,8 +33,8 @@ edit = true
 search = false
 
 [env.agent.runtime]
-type = "docker"
-image = "physim-agent:0.12.2"
+type = "prime"
+image = "python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93"
 workdir = "/workspace"
 cpu = 4
 memory = 8
@@ -48,5 +48,5 @@ max_retries = 0
 
 [env.taskset.task.tools.bundle_source]
 repo = "seanpohorence/physim-worlds"
-revision = "dcd6abd5eae76a47f326c70518315d2d1e101d86"
-path = "bundles/xv_rotor_lab/8e711a8a0ea1b52985d6598d3093c15e6024058b9ee9ab5134917beabeccf4a6"
+revision = "552229e61813b5684be2051349d778acea054922"
+path = "bundles/xv_rotor_lab_centered_v2/440472fb5868d80d7a94cdb74f615ea1525a71b3387147ab394059f815b37bf6"

@@ -5,13 +5,11 @@ suite and independently simulated truth. The BF and XV recipes establish this
 workflow; they are concrete scientific recipes, not automatic certification of
 arbitrary genomes.
 
-The development recipe now writes `centered-pulse-v2` apparatus and explicit
-`device` injection commands. Existing published BF/XV evidence uses
-`fixed-source-v1`; its saved preparations retain that behavior when loaded.
-Fresh science, controls, truth and model rollouts are being collected under the
-[authorized campaign plan](../../handoff/evaluation_campaign_20260916/PLAN.md).
-Treat the bundle's stored protocol and identities as authoritative when
-reproducing either preparation.
+The current recipes write `centered-pulse-v2` apparatus and explicit
+`device` injection commands. Published centered preparations include fresh
+science controls, independently generated truths, and native validation.
+The earlier fixed-source preparations remain available under their original
+identities. Treat each bundle's stored protocol as authoritative.
 
 1. **Simulate afresh and preserve the origin.** Inspect full activator and channel
    fields with the current phenomenology. Keep initialization, seed, numerical

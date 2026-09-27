@@ -16,6 +16,7 @@ resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
 file_bytes = int(os.environ.get("PHYSIM_PREDICTOR_FILE_MIB", "20")) * 1024 * 1024
 resource.setrlimit(resource.RLIMIT_FSIZE, (file_bytes, file_bytes))
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
 request = json.load(sys.stdin)
 if request["mode"] == "python":
     exec(compile(request["code"], "<agent-python>", "exec"), {"__name__": "__main__"})

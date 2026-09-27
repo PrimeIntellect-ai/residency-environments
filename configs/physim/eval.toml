@@ -1,7 +1,4 @@
-# Set the model and a local bundle path before running eval.
-# There is no default world or automatic selection of eval-ready registry entries.
-# Pass --env.taskset.task.tools.bundle /path/to/bundle, or set bundle below.
-# This configuration makes model API calls when executed.
+# BF centered-pulse-v2 is the pinned default. Select a local bundle to override it.
 model = "YOUR_MODEL_ID"
 num_tasks = 1
 num_rollouts = 1
@@ -13,10 +10,10 @@ id = "physim"
 
 [env.taskset.task]
 output_root = "outputs/r6/artifacts"
-agent_image = "physim-agent:0.12.2"
+agent_image = "python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93"
 
 [env.taskset.task.tools]
-# bundle = "/path/to/bundle" # Required: select one prepared world explicitly.
+# bundle = "/path/to/bundle" # Optional override of the BF default.
 max_experiments = 1000
 max_total_tu = 50000
 max_validation_attempts = 128
@@ -36,8 +33,8 @@ edit = true
 search = false
 
 [env.agent.runtime]
-type = "docker"
-image = "physim-agent:0.12.2"
+type = "prime"
+image = "python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93"
 workdir = "/workspace"
 cpu = 4
 memory = 8

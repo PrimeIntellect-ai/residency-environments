@@ -23,13 +23,16 @@ def run(command, directory, env):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--package-url", required=True)
+    package = parser.add_mutually_exclusive_group(required=True)
+    package.add_argument("--package-url")
+    package.add_argument("--wheel", type=Path)
     parser.add_argument("--configs", required=True, type=Path)
     parser.add_argument("--workdir", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
     args = parser.parse_args()
-    if not re.fullmatch(r"https://[^\s]+\.whl#sha256=[0-9a-f]{64}", args.package_url):
+    if args.package_url and not re.fullmatch(r"https://[^\s]+\.whl#sha256=[0-9a-f]{64}", args.package_url):
         parser.error("package-url must be an HTTPS wheel URL with a SHA-256 fragment")
+    package_spec = f"physim @ {args.package_url}" if args.package_url else str(args.wheel.resolve())
     directory = args.workdir.resolve()
     directory.mkdir(parents=True, exist_ok=False)
     env = {
@@ -49,8 +52,8 @@ def main():
         raise RuntimeError("uv is required")
     run([uv, "venv", "--python", sys.executable, str(directory / "venv")], directory, env)
     python = str(directory / "venv/bin/python")
-    run([uv, "pip", "install", "--python", python, f"physim[hub,reference] @ {args.package_url}"], directory, env)
-    print("Installed public Physim wheel and its public Blobkit dependency", flush=True)
+    run([uv, "pip", "install", "--python", python, package_spec], directory, env)
+    print("Installed non-editable Physim wheel and its public dependencies", flush=True)
     for name in ("p4g2_044", "bf_trail_lab", "xv_rotor_lab"):
         shutil.copyfile(args.configs / f"{name}.toml", directory / f"{name}.toml")
     check = directory / "verify.py"
@@ -74,7 +77,6 @@ for name in ("blobkit", "physim", "verifiers", "numpy", "scipy"):
     dist = metadata.distribution(name)
     installed[name] = dict(version=dist.version, direct_url=json.loads(dist.read_text("direct_url.json") or "null"))
     if name in ("blobkit", "physim"):
-        assert installed[name]["direct_url"]["url"].startswith("https://github.com/swpo/physim/releases/download/")
         assert "dir_info" not in installed[name]["direct_url"]
 worlds = []
 for name in ("p4g2_044", "bf_trail_lab", "xv_rotor_lab"):
@@ -103,10 +105,10 @@ report = dict(ok=True, installed=installed, worlds=worlds, anonymous_data_downlo
               isolated_python=True, no_model_calls=True)
 (root / "verification.json").write_text(json.dumps(report, indent=2) + "\\n")
 """)
-    output = run([python, "-I", str(check)], directory, env)
+    output = run([uv, "run", "--no-project", "--python", python, "python", "-I", str(check)], directory, env)
     print(output, end="")
     report = json.loads((directory / "verification.json").read_text())
-    report.update(workdir=str(directory), package_url=args.package_url)
+    report.update(workdir=str(directory), package=package_spec)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + "\n")
 

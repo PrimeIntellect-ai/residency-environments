@@ -6,12 +6,12 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = ["blobkit @ https://github.com/swpo/physim/releases/download/blobkit-v0.3.5/blobkit-0.3.5-py3-none-any.whl#sha256=6747e7ebe26e3909c05d91d050ebce93715d08992c51498cbf480b8206224331", "verifiers>=0.3.1,<0.4", "numpy>=1.26,<3", "scipy>=1.11,<2"]
+dependencies = ["blobkit @ https://github.com/swpo/physim/releases/download/blobkit-v0.3.5/blobkit-0.3.5-py3-none-any.whl#sha256=6747e7ebe26e3909c05d91d050ebce93715d08992c51498cbf480b8206224331", "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@e66ec52966327e79011f4c3bb34a0f9817ce32b8", "numpy==2.5.2", "scipy==1.18.0", "huggingface-hub>=1.0,<2"]
 
 [project.optional-dependencies]
 agent = [] # Compatibility with the previous local installation command.
-hub = ["huggingface-hub>=1.0,<2"]
-reference = ["numpy==2.5.2", "scipy==1.18.0"]
+hub = [] # Retained for existing installation commands.
+reference = [] # Numerical pins are required dependencies.
 
 [project.scripts]
 physim = "physim.cli:main"
@@ -21,13 +21,13 @@ requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["physim", "physim_r6", "physim_r6_scaling", "physim_prime_agent"]
+packages = ["physim", "physim_r6", "physim_r6_scaling"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.hatch.build.targets.sdist]
-include = ["physim", "physim_r6", "physim_r6_scaling", "physim_prime_agent", "pyproject.toml", "README.md", "PRIME_AGENT.md", "LICENSE", "DATA_SOURCES.md"]
+include = ["physim", "physim_r6", "physim_r6_scaling", "pyproject.toml", "README.md", "PRIME_AGENT.md", "LICENSE", "DATA_SOURCES.md"]
 
 [tool.hatch.build]
 exclude = ["physim/blobdata"]

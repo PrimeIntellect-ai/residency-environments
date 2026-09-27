@@ -1,20 +1,25 @@
-# Physim configurations
+# PhySim configurations
 
-`p4g2_044.toml`, `bf_trail_lab.toml`, and `xv_rotor_lab.toml` each select one
-specific evaluation preparation at the verified HF commit
-`dcd6abd5eae76a47f326c70518315d2d1e101d86`. They use stock Verifiers' bash harness,
-Docker runtime, and generous investigation limits. Override `model` on the CLI.
-Data are fetched and checked by the trusted host before model execution. Set
-`env.taskset.task.tools.bundle_source.offline = true` to require a populated cache.
+`eval.toml` runs the pinned BF centered-apparatus preparation by default.
+`bf_trail_lab.toml`, `xv_rotor_lab.toml`, and `p4g2_044.toml` select one current
+preparation explicitly at HF commit `552229e61813b5684be2051349d778acea054922`.
+All use the stock Bash harness and Prime runtimes, with generous investigation
+limits. Override `model` on the CLI. No config scans for additional worlds.
 
-`eval.toml` is the local-bundle variant: pass a model ID and
-`--env.taskset.task.tools.bundle /path/to/bundle`. No config scans the registry or
-implicitly selects additional eval-ready entries. A missing world is an error.
+```sh
+uv run --no-sync vf-eval @ configs/physim/eval.toml --model YOUR_MODEL_ID
+```
 
-All configs disable result uploads. `--dry-run` checks configuration without a
-model call, but does not load or verify physical data. A wiring smoke uses
-`-n 1 -r 2 --env.agent.max-turns 4`; use the full config for scientific rollouts.
+A local bundle overrides the BF default through `env.taskset.task.tools.bundle`.
+The published-world configs have an explicit `bundle_source`; remove that block
+before selecting a local bundle. `bundle_source.offline=true` requires a populated
+verified cache. The host downloads data; it never gives the bundle to the agent.
 
+All configs disable result uploads. `--dry-run` validates configuration without
+model calls; the full smoke script in the environment README additionally checks
+the selected data and complete grading path. A short model wiring check uses
+`-n 1 -r 2 --env.agent.max-turns 4`.
 
-`release.toml` records the published dataset revision and its licenses. It is
-release metadata, not an implicit runtime world-selection default.
+Select Docker locally with both `--env.agent.runtime.type docker` and
+`--env.taskset.task.tools.predictor-runtime.type docker`.
+`release.toml` records dataset publication provenance and licenses.

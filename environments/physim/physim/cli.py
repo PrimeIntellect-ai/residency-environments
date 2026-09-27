@@ -21,9 +21,11 @@ def main(argv=None):
         if name == "grade":
             p.add_argument("--artifact", required=True, type=Path)
             p.add_argument("--observations", required=True, type=Path)
+            p.add_argument("--runtime", choices=["docker", "prime"], default="prime")
     p = sub.add_parser("validate")
     p.add_argument("--artifact", required=True, type=Path)
     p.add_argument("--observations", required=True, type=Path)
+    p.add_argument("--runtime", choices=["docker", "prime"], default="prime")
     p.add_argument("--bundle", type=Path, help="Use this bundle's public port count; defaults to the 12-port reference")
     for name in ("fetch", "catalog"):
         p = sub.add_parser(name)
@@ -35,6 +37,18 @@ def main(argv=None):
             p.add_argument("--path", required=True, help="Bundle directory within the dataset repository")
             p.add_argument("--profile", choices=["simulation", "evaluation"], default="evaluation")
     args = parser.parse_args(argv)
+    sandbox_options = {}
+    if args.command in ("validate", "grade"):
+        from functools import partial
+
+        import verifiers.v1 as vf
+
+        from .runtime_sandbox import PUBLIC_IMAGE, RuntimeSandbox
+
+        runtime_type = vf.DockerConfig if args.runtime == "docker" else vf.PrimeConfig
+        sandbox_options["sandbox_factory"] = partial(
+            RuntimeSandbox, runtime_config=runtime_type(image=PUBLIC_IMAGE, allow=[])
+        )
     try:
         if args.command == "inspect":
             b = Bundle(args.bundle, profile="simulation")
@@ -83,14 +97,14 @@ def main(argv=None):
             from .evaluation import validate_predictor
 
             kwargs = {"roster": Bundle(args.bundle, profile="simulation").roster} if args.bundle else {}
-            result = validate_predictor(args.artifact, args.observations, **kwargs)
+            result = validate_predictor(args.artifact, args.observations, **kwargs, **sandbox_options)
             if not result["ok"]:
                 print(json.dumps(result, indent=2))
                 return 1
         elif args.command == "grade":
             from .evaluation import grade
 
-            result = grade(args.artifact, args.observations, args.output, bundle=args.bundle)
+            result = grade(args.artifact, args.observations, args.output, bundle=args.bundle, **sandbox_options)
             if result["status"] != "COMPLETE":
                 print(json.dumps(result, indent=2))
                 return 1

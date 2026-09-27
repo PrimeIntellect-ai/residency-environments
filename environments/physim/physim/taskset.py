@@ -10,11 +10,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import re
-from functools import wraps
+from functools import partial, wraps
 from importlib.resources import files
 from pathlib import Path, PurePosixPath
-from types import SimpleNamespace
 from typing import Literal
 
 import numpy as np
@@ -27,18 +25,25 @@ from physim.bundles import Bundle
 from . import evaluation as E
 from .artifact_store import MARKER, read_artifact_files
 from .rewards import DEFAULT_PRECISION, REWARD_MAPPING, precision_label, precision_reward
-from .sandbox import ExecutionLimits
+from .runtime_access import RuntimeAccess, request_access
+from .runtime_sandbox import PUBLIC_IMAGE, RuntimeSandbox, prepare_runtime
+from .sandbox import ExecutionLimits, SandboxInfrastructureError
 
 PROMPT_CONDITION = "interface-only-v3-log-reward"
 PROTOCOL = f"r6-verifiers-v1-bash-1-{PROMPT_CONDITION}"
-AGENT_IMAGE = "physim-agent:0.12.2"
+AGENT_IMAGE = PUBLIC_IMAGE
+DEFAULT_BUNDLE = dict(
+    repo="seanpohorence/physim-worlds",
+    revision="552229e61813b5684be2051349d778acea054922",
+    path="bundles/bf_trail_lab_centered_v2/38d159a8052bb0fc24d0d8feefe3985ac645fb19954f2c84aa54954a948b561e",
+)
 DEFAULT_OUTPUT = Path("outputs/r6/artifacts")
 DEFAULT_PROMPT = "Investigate the laboratory and submit your executable predictor."
 
 
 class R6State(vf.State):
     # This state channel is host-only; these fields are never tool arguments.
-    container_id: str = ""
+    runtime_access: dict = Field(default_factory=dict)
     prompt_condition: str = PROMPT_CONDITION
     reward_precision: float = DEFAULT_PRECISION
     output: str = ""
@@ -70,6 +75,7 @@ class R6ToolsConfig(vf.ToolsetConfig):
     max_validation_attempts: int | None = Field(128, ge=1)
     max_submission_attempts: int | None = Field(128, ge=1)
     predictor_limits: ExecutionLimits = ExecutionLimits()
+    predictor_runtime: vf.RuntimeConfig = vf.PrimeConfig(image=PUBLIC_IMAGE, workdir="/workspace", allow=[])
     reward_precision: float = Field(DEFAULT_PRECISION, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
@@ -84,7 +90,7 @@ class R6TaskConfig(vf.TaskConfig):
     output_root: Path = DEFAULT_OUTPUT
     agent_image: str = AGENT_IMAGE
     coding_interface: Literal["shell", "ipython"] = "shell"
-    setup_timeout: float = Field(180, gt=0, le=900)
+    setup_timeout: float = Field(900, gt=0, le=3600)
     checkpoint_artifact: Path | None = None
 
 
@@ -95,17 +101,11 @@ class R6Config(vf.TasksetConfig):
 
 def required_bundle(config: R6ToolsConfig, *, profile="evaluation") -> Bundle:
     path = config.bundle
-    if config.bundle_source is not None:
+    if path is None:
         from physim.hub import fetch_bundle
 
-        path = fetch_bundle(**config.bundle_source.model_dump(), profile=profile)
-    if path is None:
-        raise ValueError(
-            "No world selected: Physim has no default world and does not automatically select "
-            "eval-ready registry entries. Set env.taskset.task.tools.bundle to a verified local "
-            "bundle directory, pass --env.taskset.task.tools.bundle /path/to/bundle to eval, "
-            "or set bundle_source with an explicit HF repo, full commit revision, and bundle path."
-        )
+        source = config.bundle_source or HubBundleConfig(**DEFAULT_BUNDLE)
+        path = fetch_bundle(**source.model_dump(), profile=profile)
     bundle = Bundle(path, profile=profile)
     bundle.check_runtime()
     if config.bundle is not None:
@@ -114,11 +114,7 @@ def required_bundle(config: R6ToolsConfig, *, profile="evaluation") -> Bundle:
 
 
 def public_roster(config: R6ToolsConfig):
-    if config.bundle is not None:
-        return Bundle(config.bundle, profile="simulation").roster
-    if config.bundle_source is not None:
-        return required_bundle(config, profile="simulation").roster
-    return E.E.DEFAULT_ROSTER
+    return required_bundle(config, profile="simulation").roster
 
 
 def public_prompt(config: R6ToolsConfig, coding_interface: str = "shell") -> str:
@@ -158,32 +154,16 @@ def public_prompt(config: R6ToolsConfig, coding_interface: str = "shell") -> str
     return text
 
 
-def _container(state: R6State) -> str:
-    if not re.fullmatch(r"[0-9a-f]{12,64}", state.container_id):
-        raise vf.ToolsetError("missing trusted Docker runtime identity")
-    return state.container_id
-
-
 def _snapshot(state: R6State, target: Path, limits=None) -> dict:
-    # Reuse the existing bounded, regular-file-only artifact transport. This
-    # does not create a runtime or run an agent; Verifiers owns that runtime.
-    return E.Sandbox.export_workspace(
-        SimpleNamespace(name=_container(state), limits=limits or ExecutionLimits()), target, excludes=("./.vf-*",)
-    )
+    return request_access(state, "snapshot", target.name)
 
 
 def _put_observation(state: R6State, path: Path) -> None:
-    # No host path or code from the model is accepted. The trusted filename is
-    # fixed by the experiment counter. O_NOFOLLOW prevents a workspace symlink
-    # from redirecting this write within the agent container.
-    script = """import os,sys
-p='/observations/'+sys.argv[1]
-fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o444)
-with os.fdopen(fd,'wb') as f: f.write(sys.stdin.buffer.read())
-"""
-    E.docker(
-        ["exec", "-i", "--user", "0", _container(state), "python", "-c", script, path.name], data=path.read_bytes()
-    )
+    request_access(state, "observation", path.name)
+
+
+def predictor_factory(config):
+    return partial(RuntimeSandbox, runtime_config=config.predictor_runtime)
 
 
 def _checkpoint_file(root: Path, name: str, digest: str) -> tuple[str, bytes]:
@@ -267,6 +247,8 @@ def _check(state: R6State, config: R6ToolsConfig, *, final: bool) -> dict:
     state.checks.append(event)
     try:
         event["snapshot"] = _snapshot(state, target, config.predictor_limits)
+    except SandboxInfrastructureError:
+        raise
     except E.SandboxError as exc:
         report = dict(ok=False, gate=E.SUBMISSION_GATE_VERSION, failure=dict(stage="artifact", error=str(exc)[-3000:]))
     else:
@@ -277,6 +259,7 @@ def _check(state: R6State, config: R6ToolsConfig, *, final: bool) -> dict:
             Path(state.output) / "observations",
             roster=public_roster(config),
             execution_limits=config.predictor_limits,
+            sandbox_factory=predictor_factory(config),
         )
     event["validation"] = report
     if final and report["ok"]:
@@ -411,6 +394,8 @@ class R6Data(vf.TaskData):
 
 
 class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
+    NEEDS_CONTAINER = True
+
     @classmethod
     def toolsets(cls, config):
         if config.tools.colocated or config.tools.runtime.type != "subprocess" or config.tools.url:
@@ -419,15 +404,17 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
 
     async def setup(self, trace, runtime):
         bundle = required_bundle(self.config.tools)
-        if runtime.config.type != "docker" or not runtime.config.network_restricted:
-            raise vf.TaskError("R6 requires the Verifiers Docker runtime with framework-only network access")
+        if runtime.config.type not in ("docker", "prime") or not runtime.config.network_restricted:
+            raise vf.TaskError("PhySim requires a Docker or Prime runtime with framework-only network access")
         state = trace.state
-        state.container_id = runtime.info.id
         state.reward_precision = self.config.tools.reward_precision
         output = self.config.output_root.resolve() / trace.id
         output.mkdir(parents=True, exist_ok=False)
         (output / "observations").mkdir()
         state.output = str(output)
+        await prepare_runtime(runtime)
+        self.runtime_access = RuntimeAccess(runtime, output, self.config.tools.predictor_limits)
+        state.runtime_access = await self.runtime_access.start()
         state.usage = dict(
             experiments=0,
             max_experiments=self.config.tools.max_experiments,
@@ -484,6 +471,14 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
         return trace.state.submitted and self.config.coding_interface == "shell"
 
     async def finalize(self, trace, runtime):
+        try:
+            await self._finalize(trace, runtime)
+        finally:
+            if hasattr(self, "runtime_access"):
+                await self.runtime_access.close()
+            trace.state.runtime_access = {}
+
+    async def _finalize(self, trace, runtime):
         state = trace.state
         if state.infrastructure_error:
             raise vf.TaskError("Laboratory service failed; inspect the host diagnostic record")
@@ -560,6 +555,8 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             members=64,
             run_context=context,
             execution_limits=self.config.tools.predictor_limits,
+            sandbox_factory=predictor_factory(self.config.tools),
+            predictor_image=self.config.tools.predictor_runtime.image,
         )
         info["grade"] = grade
         score = grade["primary_joint_energy"]
@@ -604,7 +601,7 @@ class R6Taskset(vf.Taskset[R6Task, R6Config]):
                 workdir="/workspace",
                 network_allow=[],
                 resources=vf.TaskResources(cpu=4, memory=8),
-                timeout=vf.TaskTimeout(setup=self.config.task.setup_timeout, agent=86400, finalize=180, scoring=900),
+                timeout=vf.TaskTimeout(setup=self.config.task.setup_timeout, agent=86400, finalize=900, scoring=7200),
             ),
             self.config.task,
         )
