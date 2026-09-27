@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Tests
+tests/
+tests/*
+test_*
+*_test.py
+
+# Virtual environments
+.venv/
+.venv*/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Eval / runtime outputs
+outputs/
+logs/
+_out/
+_tmp_vid/
+_tmp_test_vid/
+
+# Documentation (generated)
+docs/
+
+# Backups (local snapshots)
+backup_*/
+backups/
+
+# Build artifacts
+dist/
+dist_*/
+build/
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+.codex/
+
+scripts/_archive/
+carla_env_beta/

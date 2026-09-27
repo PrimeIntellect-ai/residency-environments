@@ -5,13 +5,16 @@ description = "A long-horizon inductive-reasoning card game environment with nat
 tags = ["eleusis", "card-game", "multiturn", "tool-use", "inductive-reasoning", "eval", "verifiers"]
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "verifiers>=0.3.0,<0.4",
+    "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@7eaa262",
     "datasets>=3.0",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["eleusis"]

@@ -39,6 +39,9 @@ Unsolved episodes receive zero.
 
 ## Run
 
+Eleusis pins Verifiers to commit `7eaa262` so the chat harness matches the
+version used for training.
+
 ```bash
 uv run eval eleusis -m <model>
 ```

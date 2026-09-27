@@ -6,9 +6,10 @@ automatic and tool results flow directly into the next model call without
 injected messages or recovery turns.
 """
 
-from verifiers.v1.harnesses.null.harness import PROGRAM_SOURCE, NullHarness
+from verifiers.v1.harnesses.null.harness import NullHarness
+from verifiers.v1.harnesses.utils.launch import CHAT_PROGRAM_SOURCE
 
-ELEUSIS_PROGRAM_SOURCE = PROGRAM_SOURCE
+ELEUSIS_PROGRAM_SOURCE = CHAT_PROGRAM_SOURCE
 
 
 class EleusisHarness(NullHarness):

@@ -1,0 +1,27 @@
+num_tasks = 19
+num_rollouts = 2
+max_concurrent = 2
+push = false
+
+[env.taskset]
+id = "carla-env"
+modality = "text"
+families = ["decision", "maze", "navigation", "free_roam"]
+seeds = [0, 1]
+
+# Tasks provision the agent's Prime VM from the runtime image, and the tool server
+# runs inside it because Prime sandboxes do not expose ports.
+[env.taskset.task.tools]
+colocated = true
+
+[env.agent.harness]
+id = "null"
+
+[env.agent.runtime]
+type = "prime"
+vm = true
+
+[env.agent.timeout]
+setup = 600
+rollout = 600
+finalize = 120
