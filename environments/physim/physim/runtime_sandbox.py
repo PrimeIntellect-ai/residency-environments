@@ -5,10 +5,12 @@ truths and scoring run in the evaluator after prediction files are collected.
 """
 
 import asyncio
+import contextvars
 import io
 import json
 import tarfile
 import tempfile
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -28,6 +30,23 @@ PROCESS_ENV = dict(
     PYTHONDONTWRITEBYTECODE="1",
     MPLCONFIGDIR="/tmp/matplotlib",
 )
+_CANCELLED = contextvars.ContextVar("physim_prediction_cancelled", default=None)
+
+
+async def run_isolated(function, *args, **kwargs):
+    """Keep thread-based scoring cancellation coupled to sandbox teardown."""
+    cancelled = threading.Event()
+    token = _CANCELLED.set(cancelled)
+    worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        cancelled.set()
+        # Keep the cleanup task alive even if the caller is cancelled again.
+        await asyncio.shield(asyncio.gather(worker, return_exceptions=True))
+        raise
+    finally:
+        _CANCELLED.reset(token)
 
 
 async def prepare_runtime(runtime):
@@ -48,20 +67,46 @@ class RuntimeSandbox:
         )
         self.image = config.image
         self.runner = asyncio.Runner()
+        self.cancelled = _CANCELLED.get()
         self.context = provision_runtime(config, env=PROCESS_ENV)
+        self.entered = False
         self.runtime = None
         self.closed = False
         try:
             with tempfile.TemporaryDirectory(prefix="physim-predictor-input-") as directory:
                 frozen = Path(directory) / "artifact"
                 snapshot_artifact(artifact, frozen, self.limits)
-                self.runner.run(self.start(frozen, observations))
+                self.runner.run(self.cancellable(self.start(frozen, observations)))
         except BaseException:
             self.close()
             raise
 
+    async def cancellable(self, operation):
+        if self.cancelled is None:
+            return await operation
+
+        async def watch():
+            while not self.cancelled.is_set():
+                await asyncio.sleep(0.1)
+
+        work = asyncio.create_task(operation)
+        watcher = asyncio.create_task(watch())
+        try:
+            done, _ = await asyncio.wait((work, watcher), return_when=asyncio.FIRST_COMPLETED)
+            if watcher in done:
+                work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
+                raise asyncio.CancelledError
+            return await work
+        finally:
+            watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
+
     async def start(self, artifact, observations):
+        if self.cancelled is not None and self.cancelled.is_set():
+            raise asyncio.CancelledError
         self.runtime = await self.context.__aenter__()
+        self.entered = True
         await self.runtime.prepare_setup()
         await prepare_runtime(self.runtime)
         result = await self.runtime.run(["mkdir", "-p", "/workspace", "/observations", "/runtime", "/output"], {})
@@ -95,12 +140,13 @@ class RuntimeSandbox:
             return
         self.closed = True
         try:
-            self.runner.run(self.context.__aexit__(None, None, None))
+            if self.entered:
+                self.runner.run(self.context.__aexit__(None, None, None))
         finally:
             self.runner.close()
 
     def prediction(self, actions, queries, *, n_samples, seed, n_ports=12):
-        return self.runner.run(self.predict(actions, queries, n_samples, seed, n_ports))
+        return self.runner.run(self.cancellable(self.predict(actions, queries, n_samples, seed, n_ports)))
 
     async def predict(self, actions, queries, n_samples, seed, n_ports):
         request = dict(

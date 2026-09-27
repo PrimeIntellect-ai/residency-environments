@@ -26,7 +26,7 @@ from . import evaluation as E
 from .artifact_store import MARKER, read_artifact_files
 from .rewards import DEFAULT_PRECISION, REWARD_MAPPING, precision_label, precision_reward
 from .runtime_access import RuntimeAccess, request_access
-from .runtime_sandbox import PUBLIC_IMAGE, RuntimeSandbox, prepare_runtime
+from .runtime_sandbox import PUBLIC_IMAGE, RuntimeSandbox, prepare_runtime, run_isolated
 from .sandbox import ExecutionLimits, SandboxInfrastructureError
 
 PROMPT_CONDITION = "interface-only-v3-log-reward"
@@ -379,14 +379,14 @@ class LaboratoryTools(vf.Toolset[R6ToolsConfig, R6State]):
         """Run example requests to check execution, output format and repeatability.
         No accuracy feedback or experiment cost. Does not submit; repair and retry."""
         async with self.lock:
-            return json.dumps(await asyncio.to_thread(_check, self.state, self.config, final=False))
+            return json.dumps(await run_isolated(_check, self.state, self.config, final=False))
 
     @vf.tool
     async def submit(self) -> str:
         """Validate and freeze predictor.py plus supporting files; success ends
         exploration. Errors leave the workspace open for repairs."""
         async with self.lock:
-            return json.dumps(await asyncio.to_thread(_check, self.state, self.config, final=True))
+            return json.dumps(await run_isolated(_check, self.state, self.config, final=True))
 
 
 class R6Data(vf.TaskData):
@@ -487,7 +487,7 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
         # Stock VF ends naturally on final text or a configured limit. The task
         # collects the last executable artifact, without another model call.
         if not state.submitted:
-            report = await asyncio.to_thread(_check, state, self.config.tools, final=True)
+            report = await run_isolated(_check, state, self.config.tools, final=True)
             trace.info["r6"]["final_collection"] = report
         E.dump(Path(state.output) / "laboratory_state.json", state.model_dump(exclude={"artifacts"}))
         audit = dict(
@@ -546,7 +546,7 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             spend=info.get("spend_final"),
             laboratory_state_sha256=E.file_digest(Path(state.output) / "laboratory_state.json"),
         )
-        grade = await asyncio.to_thread(
+        grade = await run_isolated(
             E.grade,
             Path(state.artifact),
             Path(state.output) / "observations",
