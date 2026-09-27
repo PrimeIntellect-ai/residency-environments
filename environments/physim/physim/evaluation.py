@@ -5,21 +5,22 @@ Submitted code runs only in Docker. Forecasts are frozen before truth arrays loa
 
 import json
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 
 from . import blobround6_eval as E
+from .artifact_store import snapshot_artifact
 from .bundles import Bundle, BundleError, identified, load_arrays
 from .bundles import digest as file_digest
-from .sandbox import IMAGE, Sandbox, SandboxError
+from .sandbox import IMAGE, ExecutionLimits, Sandbox, SandboxError, SandboxInfrastructureError
 from .sandbox import docker as docker
 
 LIMITS = replace(E.DEFAULT_LIMITS, max_horizon_tu=50.0)
 
-SUBMISSION_GATE_VERSION = "r6-gate-public-validation-v2-roster"
+SUBMISSION_GATE_VERSION = "r6-gate-public-validation-v3-interface"
 
 
 def dump(path, value):
@@ -38,10 +39,10 @@ def read_prediction(sandbox, actions, queries, *, members=2, seed=11, roster=E.D
     return dict(samples=arrays), execution
 
 
-def public_validation_cases():
+def public_validation_cases(protocol=E.R6.APPARATUS_PROTOCOL):
     """Public API examples only; no case compiler, simulator or grading data."""
     mixed = [dict(sensor="device0", t=[0, 0.02]), dict(sensor="device1", t=[0]), dict(sensor="global", t=[0])]
-    return [
+    cases = [
         dict(name="mixed_sensors", actions=[], queries=deepcopy(mixed), n_samples=2, seed=11),
         dict(name="repeat_seed", actions=[], queries=deepcopy(mixed), n_samples=2, seed=11),
         dict(name="reordered_queries", actions=[], queries=list(reversed(deepcopy(mixed))), n_samples=2, seed=11),
@@ -75,11 +76,23 @@ def public_validation_cases():
             seed=23,
         ),
     ]
+    if protocol == E.R6.APPARATUS_PROTOCOL:
+        # Exercise both sources, both motion lanes, equal-time ordering and
+        # a move during a live pulse without exposing physical truth.
+        cases[5]["actions"] = [
+            dict(t=0, kind="inject", device=0, port=0, amp=1.0, dur=0.04),
+            dict(t=0, kind="adjust", device=0, u=[0.1, 0.0, 0.0]),
+            dict(t=0, kind="adjust", device=1, u=[0.0, 0.1, 0.0]),
+            dict(t=0, kind="inject", device=1, port=0, amp=0.5, dur=0.02),
+        ]
+    elif protocol != E.R6.LEGACY_PROTOCOL:
+        raise E.EvaluationError("unsupported apparatus protocol")
+    return cases
 
 
-def validate_predictor(artifact, observations, *, roster=E.DEFAULT_ROSTER):
+def validate_predictor(artifact, observations, *, roster=E.DEFAULT_ROSTER, execution_limits=None):
     """Run the public v5 gate; model code executes only inside Sandbox."""
-    cases = public_validation_cases()
+    cases = public_validation_cases(roster.protocol)
     report = dict(
         ok=False,
         gate=SUBMISSION_GATE_VERSION,
@@ -87,10 +100,13 @@ def validate_predictor(artifact, observations, *, roster=E.DEFAULT_ROSTER):
         checks_total=len(cases),
         experiments_used=0,
         integrated_tu=0,
-        scope="Public execution/interface checks only; no physical accuracy evaluation.",
+        scope="Public execution/interface checks only; no prediction accuracy evaluation.",
         public_roster=dict(n_ports=roster.n_ports, device_slots=list(roster.device_slots)),
     )
-    box = Sandbox(observations, artifact=artifact)
+    options = {} if execution_limits is None else {"limits": execution_limits}
+    box = Sandbox(observations, artifact=artifact, **options)
+    if execution_limits is not None:
+        report["execution_limits"] = asdict(execution_limits)
     baseline = None
     try:
         for case in cases:
@@ -114,6 +130,8 @@ def validate_predictor(artifact, observations, *, roster=E.DEFAULT_ROSTER):
                 record.update(
                     ok=True, actual_shapes=[list(a.shape) for a in arrays], wall_seconds=execution.get("wall_seconds")
                 )
+            except SandboxInfrastructureError:
+                raise
             except (SandboxError, E.EvaluationError, ValueError, TypeError) as exc:
                 record.update(ok=False, error_type=type(exc).__name__, error=str(exc)[-3000:])
                 report["checks"].append(record)
@@ -128,7 +146,7 @@ def validate_predictor(artifact, observations, *, roster=E.DEFAULT_ROSTER):
     return report
 
 
-def runtime_identity():
+def runtime_identity(protocol=E.R6.APPARATUS_PROTOCOL):
     import platform
     from importlib.metadata import version
 
@@ -137,7 +155,14 @@ def runtime_identity():
 
     from . import __version__, blobround6, devices
 
+    scorer = E
+    if protocol == E.R6.LEGACY_PROTOCOL:
+        from .legacy_v1 import blobround6
+        from .legacy_v1 import blobround6_eval as scorer
+    elif protocol != E.R6.APPARATUS_PROTOCOL:
+        raise BundleError("unsupported apparatus protocol")
     return dict(
+        protocol=protocol,
         physim=__version__,
         blobkit=version("blobkit"),
         numpy=np.__version__,
@@ -145,7 +170,7 @@ def runtime_identity():
         python=platform.python_version(),
         platform=platform.platform(),
         source_sha256={
-            module.__name__: file_digest(module.__file__) for module in (sim_cpu, genome, devices, blobround6, E)
+            module.__name__: file_digest(module.__file__) for module in (sim_cpu, genome, devices, blobround6, scorer)
         },
     )
 
@@ -165,7 +190,7 @@ def score_frozen(bundle, output, saved, failures, *, members, predictor):
         arrays = load_arrays(path)
         pred = dict(samples=[arrays[f"query{i}"] for i in range(len(case["queries"]))])
         truth = bundle.truth(record)
-        score = E.score_case(
+        score = bundle.scoring.score_case(
             case,
             pred,
             truth,
@@ -200,7 +225,7 @@ def score_frozen(bundle, output, saved, failures, *, members, predictor):
         truth_policy="Retained independent native realizations; no truth/predictor seed pairing.",
         references=bundle.references(),
         predictor=predictor,
-        runtime=runtime_identity(),
+        runtime=runtime_identity(bundle.protocol),
         forecast_manifest_sha256=file_digest(output / "grading_predictions/manifest.json"),
         by_family={
             family: float(np.mean([r["joint_energy"] for r in results if r["family"] == family]))
@@ -245,7 +270,7 @@ def _forecast_suite(bundle, output, predict, *, members, predictor):
                 )
             )
         except Exception as exc:
-            failures.append(dict(case_id=case["id"], error=str(exc)[:3000]))
+            failures.append(dict(case_id=case["id"], error_type=type(exc).__name__, error=str(exc)[:3000]))
     dump(
         forecast_dir / "manifest.json",
         dict(
@@ -261,9 +286,12 @@ def _forecast_suite(bundle, output, predict, *, members, predictor):
     return score_frozen(bundle, output, saved, failures, members=members, predictor=predictor)
 
 
-def _snapshot_inputs(source, target, *, observations=False):
+def _snapshot_inputs(source, target, *, observations=False, limits=None):
     """Freeze bounded public input files once for the entire evaluation."""
     source, target = Path(source).resolve(), Path(target)
+    limits = limits or ExecutionLimits()
+    if not observations:
+        return snapshot_artifact(source, target, limits)["files"]
     if not source.is_dir():
         raise SandboxError("public input directory is missing")
     target.mkdir()
@@ -273,7 +301,8 @@ def _snapshot_inputs(source, target, *, observations=False):
             raise SandboxError("public artifact symlinks are forbidden")
         if not p.is_file() or (observations and (p.parent != source or p.suffix != ".npz")):
             continue
-        if len(rows) >= (100 if observations else 2048):
+        # Host-generated observations must not impose a hidden experiment budget.
+        if not observations and len(rows) >= 2048:
             raise SandboxError("public input file count exceeds cap")
         relative = p.relative_to(source)
         dest = target / relative
@@ -283,14 +312,16 @@ def _snapshot_inputs(source, target, *, observations=False):
             for block in iter(lambda: src.read(1024 * 1024), b""):
                 size += len(block)
                 total += len(block)
-                if size > 20 * 1024 * 1024 or total > (2000 if observations else 64) * 1024 * 1024:
+                if size > limits.file_mib * 1024 * 1024 or (
+                    not observations and total > limits.artifact_mib * 1024 * 1024
+                ):
                     raise SandboxError("public input byte cap exceeded")
                 dst.write(block)
         rows.append(dict(path=relative.as_posix(), sha256=file_digest(dest)))
     return rows
 
 
-def grade(artifact, observations, output, *, bundle, members=64, run_context=None):
+def grade(artifact, observations, output, *, bundle, members=64, run_context=None, execution_limits=None):
     """Freeze public inputs, then grade submitted code exclusively in Docker."""
     import tempfile
 
@@ -302,12 +333,16 @@ def grade(artifact, observations, output, *, bundle, members=64, run_context=Non
             kind="submitted-artifact",
             image=IMAGE,
             run_context=run_context,
-            files=_snapshot_inputs(artifact, root / "artifact"),
-            observations=_snapshot_inputs(observations, root / "observations", observations=True),
+            execution_limits=asdict(execution_limits) if execution_limits is not None else None,
+            files=_snapshot_inputs(artifact, root / "artifact", limits=execution_limits),
+            observations=_snapshot_inputs(
+                observations, root / "observations", observations=True, limits=execution_limits
+            ),
         )
 
         def predict(case, count, seed):
-            box = Sandbox(root / "observations", artifact=root / "artifact")
+            options = {} if execution_limits is None else {"limits": execution_limits}
+            box = Sandbox(root / "observations", artifact=root / "artifact", **options)
             try:
                 return read_prediction(
                     box, case["actions"], case["queries"], members=count, seed=seed, roster=bundle.roster
@@ -327,7 +362,7 @@ def reference_demo(bundle, output):
     initial = bundle.make_oracle().sample_truth([], queries, n_samples=1, truth_seed=0)["samples"]
     model = E.PersistencePredictor(dict(zip(sensors, [a[0, 0] for a in initial])), roster=bundle.roster)
     checks, previous = [], None
-    for case in public_validation_cases():
+    for case in public_validation_cases(bundle.roster.protocol):
         pred = model.predict(case["actions"], case["queries"], n_samples=case["n_samples"], seed=case["seed"])
         shapes = E.validate_case(
             dict(id="interface-check", actions=case["actions"], queries=case["queries"]),

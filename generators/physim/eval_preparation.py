@@ -55,7 +55,7 @@ def prepare(name, destination, source):
         device_slots=[13, 19],
         port_permutation=permutation,
         adjustment_matrix=np.eye(3).tolist(),
-        emitter_yx=((center + [0, 6]) % 128).tolist(),
+        protocol=R6.APPARATUS_PROTOCOL,
     )
     write_json(destination / "world.json", genome)
     write_json(destination / "apparatus.json", apparatus)
@@ -74,6 +74,14 @@ def prepare(name, destination, source):
             selection="First independently simulated preparation; apparatus centered by fixed activator-0 maximum rule.",
         ),
     )
+
+
+def preparation_protocol(preparation):
+    apparatus = json.loads((Path(preparation) / "apparatus.json").read_text())
+    protocol = apparatus.get("protocol", R6.LEGACY_PROTOCOL)
+    if protocol not in (R6.LEGACY_PROTOCOL, R6.APPARATUS_PROTOCOL):
+        raise ValueError("unsupported apparatus protocol")
+    return protocol
 
 
 def make_oracle(preparation, capture=None):
@@ -101,12 +109,17 @@ def make_oracle(preparation, capture=None):
         if capture is not None and member == 0:
             capture.append((sim["t_step"] * sim["dt"], sim["F"].copy()))
 
-    return R6.OracleRunner(
+    runner, extra = R6, {}
+    if preparation_protocol(preparation) == R6.LEGACY_PROTOCOL:
+        from physim.legacy_v1 import blobround6 as runner
+
+        extra = {"_emitter_yx": apparatus["emitter_yx"]}
+    return runner.OracleRunner(
         _template=state,
         _devices=devices,
         _port_perm=apparatus["port_permutation"],
         _adjust_mix=apparatus["adjustment_matrix"],
-        _emitter_yx=apparatus["emitter_yx"],
+        **extra,
         _stepper=step if capture is not None else step_chunk,
     )
 
@@ -135,7 +148,7 @@ def observe(preparation, record, output, members, seed):
         observations_sha256=digest(output / "observations.npz"),
         fields_sha256=digest(output / "fields.npz"),
         preparation_sha256=digest(Path(preparation) / "preparation.npz"),
-        implementation=implementation_identity(),
+        implementation=implementation_identity(preparation_protocol(preparation)),
         recipe_sha256=digest(__file__),
     )
     write_json(output / "receipt.json", receipt)
@@ -146,7 +159,7 @@ def bf_programs():
     times = [0, 2, 5, 8, 10, 12, 15, 20, 22, 25, 30, 35, 40, 45, 50]
 
     def pulse(port, amplitude, start=0):
-        return dict(t=start, kind="inject", port=port, amp=amplitude, dur=5)
+        return dict(t=start, kind="inject", device=0, port=port, amp=amplitude, dur=5)
 
     arms = {
         "sham": [],
@@ -178,11 +191,29 @@ def with_pose_programs(programs):
     return programs
 
 
+def with_centered_programs(programs, port, amplitude=0.3):
+    """Exercise launch position, same-time ordering, and independent instruments."""
+    from copy import deepcopy
+
+    pulse = dict(t=0, kind="inject", device=0, port=port, amp=amplitude, dur=5)
+    move = dict(t=0, kind="adjust", device=0, u=[1, 0, 0])
+    arms = {
+        "pulse_then_move": [pulse, move],
+        "move_then_pulse": [move, pulse],
+        "two_sources": [pulse, dict(t=0, kind="adjust", device=1, u=[0, 1, 0]), dict(pulse, device=1)],
+        "move_during_pulse": [pulse, dict(move, t=2)],
+    }
+    return programs + [
+        dict(id=name, actions=deepcopy(actions), queries=deepcopy(programs[0]["queries"]))
+        for name, actions in arms.items()
+    ]
+
+
 def xv_programs():
     times = [0, 2, 5, 8, 10, 12, 15, 20, 22, 25, 30, 35, 40, 45, 50]
 
     def pulse(port, amplitude=0.3, start=0):
-        return dict(t=start, kind="inject", port=port, amp=amplitude, dur=5)
+        return dict(t=start, kind="inject", device=0, port=port, amp=amplitude, dur=5)
 
     arms = {
         "sham": [],
@@ -213,7 +244,9 @@ if __name__ == "__main__":
     parser.add_argument("--workers", type=int, default=3)
     args = parser.parse_args()
     prepare(args.world, args.output / "preparation", source=args.source)
-    programs = bf_programs() if args.world == "bf" else xv_programs()
+    programs = with_centered_programs(
+        bf_programs() if args.world == "bf" else xv_programs(), 1 if args.world == "bf" else 3
+    )
     write_json(args.output / "programs.json", programs)
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         jobs = [

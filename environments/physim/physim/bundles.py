@@ -54,16 +54,23 @@ def identified(kind, payload):
     return dict(payload, id=kind + ":sha256:" + hashlib.sha256(canonical(payload)).hexdigest())
 
 
-def implementation_identity():
+def implementation_identity(protocol=R6.APPARATUS_PROTOCOL):
     from blobkit import __version__, genome
     from blobkit.soup import sim_cpu, sim_v1
 
     from . import devices
 
+    runner = R6
+    if protocol == R6.LEGACY_PROTOCOL:
+        from .legacy_v1 import blobround6 as runner
+    elif protocol != R6.APPARATUS_PROTOCOL:
+        raise BundleError("unsupported apparatus protocol")
     return dict(
         blobkit_version=__version__,
         reference_dependencies=REFERENCE_DEPENDENCIES,
-        source_sha256={m.__name__: digest(m.__file__) for m in (genome, sim_cpu, sim_v1, devices, R6)},
+        source_sha256={
+            m.__name__.replace(".legacy_v1", ""): digest(m.__file__) for m in (genome, sim_cpu, sim_v1, devices, runner)
+        },
     )
 
 
@@ -256,7 +263,7 @@ class Bundle:
         self.apparatus = read_json(self.verified_path("apparatus.json"))
         self._validate_physics()
         self.roster = scoring.PublicRoster(
-            n_ports=len(self.genome["acts"]) + len(self.genome["chans"]), device_slots=(13, 19)
+            n_ports=len(self.genome["acts"]) + len(self.genome["chans"]), device_slots=(13, 19), protocol=self.protocol
         )
         self.limits = replace(scoring.DEFAULT_LIMITS, max_horizon_tu=50.0)
         self.suite = None
@@ -333,17 +340,28 @@ class Bundle:
         if type(noise) not in (int, float) or not math.isfinite(noise) or not 0 <= noise <= 1:
             raise BundleError("invalid noise coefficient")
         a = self.apparatus
-        if (
-            type(a) is not dict
-            or set(a) != {"devices", "device_slots", "port_permutation", "adjustment_matrix", "emitter_yx"}
-            or a["device_slots"] != [13, 19]
-            or len(a["devices"]) != 2
-        ):
+        if type(a) is not dict:
+            raise BundleError("invalid reference apparatus")
+        self.protocol = a.get("protocol", R6.LEGACY_PROTOCOL)
+        if self.protocol not in (R6.LEGACY_PROTOCOL, R6.APPARATUS_PROTOCOL):
+            raise BundleError("unsupported apparatus protocol")
+        keys = {"devices", "device_slots", "port_permutation", "adjustment_matrix"}
+        keys |= {"emitter_yx"} if self.protocol == R6.LEGACY_PROTOCOL else {"protocol"}
+        self.runner = R6
+        self.scoring = scoring
+        if self.protocol == R6.LEGACY_PROTOCOL:
+            from .legacy_v1 import blobround6, blobround6_eval
+
+            self.runner, self.scoring = blobround6, blobround6_eval
+        if type(a) is not dict or set(a) != keys or a["device_slots"] != [13, 19] or len(a["devices"]) != 2:
             raise BundleError("invalid reference apparatus")
         perm = a["port_permutation"]
         if type(perm) is not list or any(type(x) is not int for x in perm) or sorted(perm) != list(range(na + nc)):
             raise BundleError("invalid port permutation")
-        for key, shape in (("adjustment_matrix", (3, 3)), ("emitter_yx", (2,))):
+        geometry = [("adjustment_matrix", (3, 3))]
+        if self.protocol == R6.LEGACY_PROTOCOL:
+            geometry.append(("emitter_yx", (2,)))
+        for key, shape in geometry:
             v = np.asarray(a[key], dtype=float)
             if v.shape != shape or not np.isfinite(v).all():
                 raise BundleError("invalid apparatus geometry")
@@ -387,7 +405,7 @@ class Bundle:
 
     def _validate_suite(self):
         suite = self.suite
-        if self.manifest["objects"]["suite"].get("scoring_source_sha256") != digest(scoring.__file__):
+        if self.manifest["objects"]["suite"].get("scoring_source_sha256") != digest(self.scoring.__file__):
             raise BundleError("bundle requires a different scoring implementation")
         if (
             type(suite) is not dict
@@ -413,7 +431,7 @@ class Bundle:
             if case["id"] in ids:
                 raise BundleError("duplicate suite case")
             ids.add(case["id"])
-            scoring.validate_plan(
+            self.scoring.validate_plan(
                 case, groups=record["groups"], n_samples=64, n_truth=2, roster=self.roster, limits=self.limits
             )
             if record["truth"] not in self.files or self.files[record["truth"]]["role"] != "truth":
@@ -426,7 +444,7 @@ class Bundle:
         from importlib.metadata import version
 
         declared = self.manifest["objects"]["world"].get("implementation")
-        if declared != implementation_identity():
+        if declared != implementation_identity(self.protocol):
             raise BundleError("bundle requires a different simulator implementation")
         if any(version(name) != expected for name, expected in REFERENCE_DEPENDENCIES.items()):
             raise BundleError("native reference simulation requires physim[reference] dependency versions")
@@ -458,12 +476,13 @@ class Bundle:
             device.dilation = record["dilation"]
             device.Bm = np.asarray(record["motion_basis"], dtype=float)
             devices.append(device)
-        return R6.OracleRunner(
+        extra = {"_emitter_yx": self.apparatus["emitter_yx"]} if self.protocol == R6.LEGACY_PROTOCOL else {}
+        return self.runner.OracleRunner(
             _template=state,
             _devices=devices,
             _port_perm=self.apparatus["port_permutation"],
             _adjust_mix=self.apparatus["adjustment_matrix"],
-            _emitter_yx=self.apparatus["emitter_yx"],
+            **extra,
             _stepper=step_chunk,
         )
 

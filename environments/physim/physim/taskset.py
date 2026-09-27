@@ -21,13 +21,16 @@ import numpy as np
 import verifiers.v1 as vf
 from pydantic import BaseModel, Field, model_validator
 
-from physim.blobround6_eval import EvaluationError
-from physim.blobround6_explore import ExperimentService
+from physim.blobround6_explore import ExperimentService, RequestError
 from physim.bundles import Bundle
 
 from . import evaluation as E
+from .artifact_store import MARKER, read_artifact_files
+from .rewards import DEFAULT_PRECISION, REWARD_MAPPING, precision_label, precision_reward
+from .sandbox import ExecutionLimits
 
-PROTOCOL = "r6-verifiers-v1-bash-1"
+PROMPT_CONDITION = "interface-only-v3-log-reward"
+PROTOCOL = f"r6-verifiers-v1-bash-1-{PROMPT_CONDITION}"
 AGENT_IMAGE = "physim-agent:0.12.2"
 DEFAULT_OUTPUT = Path("outputs/r6/artifacts")
 DEFAULT_PROMPT = "Investigate the laboratory and submit your executable predictor."
@@ -36,6 +39,8 @@ DEFAULT_PROMPT = "Investigate the laboratory and submit your executable predicto
 class R6State(vf.State):
     # This state channel is host-only; these fields are never tool arguments.
     container_id: str = ""
+    prompt_condition: str = PROMPT_CONDITION
+    reward_precision: float = DEFAULT_PRECISION
     output: str = ""
     submitted: bool = False
     artifact: str | None = None
@@ -46,6 +51,7 @@ class R6State(vf.State):
     infrastructure_error: str | None = None
     exploration_closed: bool = False
     checkpoint: dict = Field(default_factory=dict)
+    rejected_requests: list[dict] = Field(default_factory=list)
 
 
 class HubBundleConfig(BaseModel):
@@ -59,10 +65,12 @@ class HubBundleConfig(BaseModel):
 class R6ToolsConfig(vf.ToolsetConfig):
     bundle: Path | None = None
     bundle_source: HubBundleConfig | None = None
-    max_experiments: int = Field(1000, ge=1)
-    max_total_tu: float = Field(50000, gt=0, le=1_000_000)
-    max_validation_attempts: int = Field(128, ge=1)
-    max_submission_attempts: int = Field(128, ge=1)
+    max_experiments: int | None = Field(1000, ge=1)
+    max_total_tu: float | None = Field(50000, gt=0, le=1_000_000)
+    max_validation_attempts: int | None = Field(128, ge=1)
+    max_submission_attempts: int | None = Field(128, ge=1)
+    predictor_limits: ExecutionLimits = ExecutionLimits()
+    reward_precision: float = Field(DEFAULT_PRECISION, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def unambiguous_bundle(self):
@@ -114,70 +122,39 @@ def public_roster(config: R6ToolsConfig):
 
 
 def public_prompt(config: R6ToolsConfig, coding_interface: str = "shell") -> str:
-    n_ports = public_roster(config).n_ports
-    spec = files("physim").joinpath("data/agent_spec.txt").read_text()
-    # The configured exploration budget is also written explicitly below.
-    spec = spec.replace("{max_experiments}", str(config.max_experiments))
-    spec = spec.replace("{max_total_tu}", f"{config.max_total_tu:g}")
-    for key, value in (("n_ports", n_ports), ("last_port", n_ports - 1), ("example_port", min(2, n_ports - 1))):
-        spec = spec.replace("{" + key + "}", str(value))
-    text = f"""Investigate the anonymous laboratory and deliver /workspace/predictor.py.
+    """Render one ordered contract, shared by the prompt and workspace manual."""
 
-You have the harness's bash and edit tools for working with files and running Python.
-NumPy, SciPy, scikit-learn and Matplotlib are installed. The working directory is
-/workspace. Files persist throughout the coding session. Laboratory tools:
+    def budget(value):
+        return "unlimited" if value is None else f"{value:g}"
 
-- laboratory_experiment(actions, queries): run an independent experiment from the
-  prepared start; save full NPZ observations in /observations and return their path.
-- laboratory_usage(): inspect the laboratory budget.
-- laboratory_validate(): test a snapshot of your predictor against public interface
-  examples; return errors to repair. Does not submit or test physical accuracy.
-- laboratory_submit(): check and freeze the current predictor and supporting files.
-  A failed check leaves the workspace open for repair; a successful submission ends
-  exploration. Finish the coding session once submission is accepted.
-
-The experiment budget is {config.max_experiments} experiments and
-{config.max_total_tu:g} integrated time units. Each experiment costs its largest
-requested timestamp, at most 50 tu. You may validate {config.max_validation_attempts}
-times and attempt submission {config.max_submission_attempts} times; neither costs
-experiments or simulation time. Save a simple working predictor early, validate it,
-then improve it and submit before your coding session ends. If the session ends
-with predictor.py written, its final snapshot is collected and checked as well.
-
-Implement predict(actions, queries, n_samples=64, seed=0) at module scope. Return
-{{"samples": [array_for_query0, array_for_query1, ...]}}. Each array has shape
-(n_samples, len(query["t"]), {n_ports}, sensor_slots), where slots are device0=13,
-device1=19, global=2. Handle empty query/time lists, different query orders,
-different time grids, and the requested member count. The same seed must reproduce
-the same result. During prediction /workspace and /observations are read-only;
-/tmp is writable. No further laboratory calls are available during prediction.
-
-Read observation metadata and arrays together:
-```python
-import json
-import numpy as np
-with np.load(observation_path, allow_pickle=False) as data:
-    request = json.loads(data["request"].item())
-    observations = [(query, data[f"query{{i}}"].copy())
-                    for i, query in enumerate(request["queries"])]
-```
-Observation arrays have shape (1, times, {n_ports}, slots). query0 is the first query
-in that file, not a fixed sensor. Align sensor identities and timestamps before
-comparing observations from different experiments. There is no separate metadata
-JSON file. Do not print whole arrays into the conversation; analyze saved files.
-
-The laboratory tools are your only access to the system. Grading happens after
-artifact freeze, on independent realizations and undisclosed action/query programs.
-The model receives no hidden equations, fields, sensor locations, or test answers.
-
-{spec}"""
+    roster = public_roster(config)
+    name = "agent_spec_v1.txt" if roster.protocol == E.E.R6.LEGACY_PROTOCOL else "agent_spec.txt"
+    text = files("physim").joinpath("data", name).read_text()
+    coding_tools = "Use the bash and edit tools to run commands and work with files."
     if coding_interface == "ipython":
-        text = text.replace(
-            "You have the harness's bash and edit tools for working with files and running Python.",
+        coding_tools = (
             "Use the harness's persistent IPython session to analyze data and write files.\n"
             "Use the MCP skill wrappers advertised by the harness for laboratory calls;\n"
-            "follow their actual import and calling instructions.",
+            "follow their actual import and calling instructions."
         )
+    values = dict(
+        n_ports=roster.n_ports,
+        last_port=roster.n_ports - 1,
+        example_port=min(2, roster.n_ports - 1),
+        max_experiments=budget(config.max_experiments),
+        max_total_tu=budget(config.max_total_tu),
+        max_validation_attempts=budget(config.max_validation_attempts),
+        max_submission_attempts=budget(config.max_submission_attempts),
+        predictor_cpus=config.predictor_limits.cpus,
+        predictor_memory_gib=config.predictor_limits.memory_gib,
+        predictor_cpu_seconds=config.predictor_limits.cpu_seconds,
+        predictor_wall_seconds=config.predictor_limits.wall_seconds,
+        coding_tools=coding_tools,
+        reward_precision=precision_label(config.reward_precision),
+        reward_threshold=f"10^(-{precision_label(config.reward_precision)})",
+    )
+    for key, value in values.items():
+        text = text.replace("{" + key + "}", str(value))
     return text
 
 
@@ -187,10 +164,12 @@ def _container(state: R6State) -> str:
     return state.container_id
 
 
-def _snapshot(state: R6State, target: Path) -> dict:
+def _snapshot(state: R6State, target: Path, limits=None) -> dict:
     # Reuse the existing bounded, regular-file-only artifact transport. This
     # does not create a runtime or run an agent; Verifiers owns that runtime.
-    return E.Sandbox.export_workspace(SimpleNamespace(name=_container(state)), target, excludes=("./.vf-*",))
+    return E.Sandbox.export_workspace(
+        SimpleNamespace(name=_container(state), limits=limits or ExecutionLimits()), target, excludes=("./.vf-*",)
+    )
 
 
 def _put_observation(state: R6State, path: Path) -> None:
@@ -221,16 +200,26 @@ def _checkpoint_file(root: Path, name: str, digest: str) -> tuple[str, bytes]:
     return str(rel), data
 
 
-def load_checkpoint(artifact: Path) -> tuple[dict, list, list]:
+def load_checkpoint(artifact: Path, reward_precision: float = DEFAULT_PRECISION) -> tuple[dict, list, list]:
     """Recover public workspace/data only; never copy host state or private origin."""
     artifact = artifact.resolve()
     state_path = artifact.parent / "laboratory_state.json"
     prior = json.loads(state_path.read_text())
+    if prior.get("prompt_condition") != PROMPT_CONDITION:
+        raise vf.TaskError("checkpoint belongs to a different or unrecorded prompt condition")
+    if prior.get("reward_precision") != reward_precision:
+        raise vf.TaskError("checkpoint belongs to a different or unrecorded reward precision")
     check = next((c for c in prior["checks"] if c["path"] == artifact.name), None)
     if not check or not check.get("validation", {}).get("ok"):
         raise vf.TaskError("checkpoint must be a previously validated artifact")
     manifest = check["snapshot"]["files"]
-    files = [_checkpoint_file(artifact, f["path"], f["sha256"]) for f in manifest]
+    if (artifact / MARKER).exists():
+        try:
+            files = read_artifact_files(artifact, manifest)
+        except E.SandboxError as exc:
+            raise vf.TaskError(str(exc)) from exc
+    else:
+        files = [_checkpoint_file(artifact, f["path"], f["sha256"]) for f in manifest]
     if "predictor.py" not in {name for name, _ in files}:
         raise vf.TaskError("checkpoint has no predictor.py")
     experiments = prior["experiments"]
@@ -270,19 +259,25 @@ def _check(state: R6State, config: R6ToolsConfig, *, final: bool) -> dict:
     kind = "submit" if final else "validate"
     attempt = 1 + sum(row["kind"] == kind for row in state.checks)
     cap = config.max_submission_attempts if final else config.max_validation_attempts
-    if attempt > cap:
+    if cap is not None and attempt > cap:
+        state.rejected_requests.append(dict(kind=kind, error="attempt limit reached", attempt=attempt))
         return dict(ok=False, error=f"{kind} attempt limit reached", finalized=False)
     target = Path(state.output) / f"{kind}_{attempt:02d}"
     event = dict(kind=kind, attempt=attempt, path=target.name)
     state.checks.append(event)
     try:
-        event["snapshot"] = _snapshot(state, target)
+        event["snapshot"] = _snapshot(state, target, config.predictor_limits)
     except E.SandboxError as exc:
         report = dict(ok=False, gate=E.SUBMISSION_GATE_VERSION, failure=dict(stage="artifact", error=str(exc)[-3000:]))
     else:
         # A validator-container startup failure is infrastructure failure, not
         # evidence that the submitted predictor violates the contract.
-        report = E.validate_predictor(target, Path(state.output) / "observations", roster=public_roster(config))
+        report = E.validate_predictor(
+            target,
+            Path(state.output) / "observations",
+            roster=public_roster(config),
+            execution_limits=config.predictor_limits,
+        )
     event["validation"] = report
     if final and report["ok"]:
         state.submitted = True
@@ -301,14 +296,34 @@ class LaboratoryTools(vf.Toolset[R6ToolsConfig, R6State]):
         self.state_transaction = asyncio.Lock()
 
     def _with_state(self, fn):
-        wrapped = super()._with_state(fn)
+        @wraps(fn)
+        async def public_call(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as exc:
+                # Record failure inside VF's state transaction. Returning a
+                # neutral response lets VF push this state; the task stop hook
+                # then raises a framework error, so this can never earn a score.
+                self.state.infrastructure_error = self.state.infrastructure_error or f"{type(exc).__name__}: {exc}"
+                if self.state.output:
+                    E.dump(
+                        Path(self.state.output) / "laboratory_state.json", self.state.model_dump(exclude={"artifacts"})
+                    )
+                return json.dumps(dict(error="Laboratory service failed; infrastructure intervention is required"))
+
+        wrapped = super()._with_state(public_call)
 
         @wraps(wrapped)
         async def serialized(*args, **kwargs):
             # VF's state channel replaces the full state. Serialize the entire
             # pull/call/push transaction, including under parallel-tool harnesses.
             async with self.state_transaction:
-                return await wrapped(*args, **kwargs)
+                try:
+                    return await wrapped(*args, **kwargs)
+                except Exception:
+                    # State-channel failures happen outside the public call.
+                    # Their URLs and host paths are not agent-facing feedback.
+                    raise vf.ToolsetError("Laboratory connection failed") from None
 
         return serialized
 
@@ -327,9 +342,8 @@ class LaboratoryTools(vf.Toolset[R6ToolsConfig, R6State]):
 
     @vf.tool
     async def experiment(self, actions: list[dict], queries: list[dict]) -> str:
-        """Run from the prepared start and save NPZ arrays. actions: inject
-        {t,kind:'inject',port:<public port index>,amp:0..3,dur} or adjust
-        {t,kind:'adjust',device:0..1,u:[-1..1,-1..1,-1..1]}. queries:
+        """Run from the prepared start and save NPZ measurements. Use the action
+        keys and scheduling rules in AGENT_SPEC.md. queries:
         [{sensor:'device0'|'device1'|'global',t:[strictly increasing times]}].
         All timestamps are absolute, 0..50 tu. Return path, shapes and usage.
         """
@@ -338,12 +352,20 @@ class LaboratoryTools(vf.Toolset[R6ToolsConfig, R6State]):
                 return json.dumps(dict(error="predictor already submitted"))
             if self.state.exploration_closed:
                 return json.dumps(dict(error="exploration closed for checkpoint recovery", usage=self.state.usage))
-            service = self._service()
             try:
+                service = self._service()
                 data = await asyncio.to_thread(service.experiment, actions, queries)
-            except (ValueError, EvaluationError) as exc:
+            except RequestError as exc:
                 self.state.usage = service.usage()
+                self.state.rejected_requests.append(dict(kind="experiment", error=str(exc)))
+                E.dump(Path(self.state.output) / "laboratory_state.json", self.state.model_dump(exclude={"artifacts"}))
                 return json.dumps(dict(error=str(exc), usage=self.state.usage))
+            except Exception as exc:
+                # Internal failures are infrastructure errors, never feedback
+                # about the hidden implementation. Keep details on the host.
+                self.state.infrastructure_error = f"{type(exc).__name__}: {exc}"
+                E.dump(Path(self.state.output) / "laboratory_state.json", self.state.model_dump(exclude={"artifacts"}))
+                raise vf.ToolsetError("Laboratory execution failed; infrastructure intervention is required") from None
             self.state.usage = service.usage()
             path = Path(self.state.output) / "observations" / f"experiment_{self.state.usage['experiments']:03d}.npz"
             request = dict(actions=actions, queries=queries)
@@ -371,8 +393,8 @@ class LaboratoryTools(vf.Toolset[R6ToolsConfig, R6State]):
 
     @vf.tool
     async def validate(self) -> str:
-        """Check a predictor snapshot against public interface cases. No accuracy
-        feedback and no experiment cost. Does not submit; repair errors and retry."""
+        """Run example requests to check execution, output format and repeatability.
+        No accuracy feedback or experiment cost. Does not submit; repair and retry."""
         async with self.lock:
             return json.dumps(await asyncio.to_thread(_check, self.state, self.config, final=False))
 
@@ -401,6 +423,7 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             raise vf.TaskError("R6 requires the Verifiers Docker runtime with framework-only network access")
         state = trace.state
         state.container_id = runtime.info.id
+        state.reward_precision = self.config.tools.reward_precision
         output = self.config.output_root.resolve() / trace.id
         output.mkdir(parents=True, exist_ok=False)
         (output / "observations").mkdir()
@@ -418,7 +441,9 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             "/workspace/AGENT_SPEC.md", public_prompt(self.config.tools, self.config.coding_interface).encode()
         )
         if self.config.checkpoint_artifact is not None:
-            metadata, files, observations = await asyncio.to_thread(load_checkpoint, self.config.checkpoint_artifact)
+            metadata, files, observations = await asyncio.to_thread(
+                load_checkpoint, self.config.checkpoint_artifact, self.config.tools.reward_precision
+            )
             state.checkpoint = metadata
             state.exploration_closed = True
             state.usage.update(
@@ -446,6 +471,12 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
         )
 
     @vf.stop
+    async def infrastructure_failed(self, trace: vf.Trace) -> bool:
+        if trace.state.infrastructure_error:
+            raise vf.TaskError("Laboratory service failed; inspect the host diagnostic record")
+        return False
+
+    @vf.stop
     async def submitted(self, trace: vf.Trace) -> bool:
         # This installed ACP adapter reports an externally stopped RLM prompt
         # as a harness error. Let RLM return its final answer naturally; submit
@@ -454,6 +485,8 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
 
     async def finalize(self, trace, runtime):
         state = trace.state
+        if state.infrastructure_error:
+            raise vf.TaskError("Laboratory service failed; inspect the host diagnostic record")
         if not state.output:
             return
         # Stock VF ends naturally on final text or a configured limit. The task
@@ -462,17 +495,40 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             report = await asyncio.to_thread(_check, state, self.config.tools, final=True)
             trace.info["r6"]["final_collection"] = report
         E.dump(Path(state.output) / "laboratory_state.json", state.model_dump(exclude={"artifacts"}))
+        audit = dict(
+            stop_condition=trace.stop_condition,
+            truncated=trace.is_truncated,
+            submitted=state.submitted,
+            final_collection=trace.info.get("r6", {}).get("final_collection"),
+            model_turns=trace.num_turns,
+            input_tokens=trace.num_input_tokens,
+            output_tokens=trace.num_output_tokens,
+            length_finished_calls=[i for i, call in enumerate(trace.calls) if call.finish_reason == "length"],
+            agent_limits={
+                name: getattr(trace.agent.config, name, None)
+                for name in ("max_turns", "max_input_tokens", "max_output_tokens", "max_total_tokens")
+            },
+            timeouts=trace.agent.config.timeout.model_dump(),
+            laboratory_limits=self.config.tools.model_dump(mode="json", exclude={"bundle", "bundle_source"}),
+            usage=state.usage,
+            rejected_requests=state.rejected_requests,
+            validation_attempts=sum(c["kind"] == "validate" for c in state.checks),
+            submission_attempts=sum(c["kind"] == "submit" for c in state.checks),
+        )
+        trace.info.setdefault("r6", {})["limit_audit"] = audit
+        E.dump(Path(state.output) / "limit_audit.json", audit)
 
     @vf.reward(weight=1)
     async def prediction_reward(self, trace) -> float:
         state = trace.state
         info = trace.info.setdefault("r6", {})
+        info["reward_precision"] = self.config.tools.reward_precision
+        info["reward_mapping"] = REWARD_MAPPING
         if not state.submitted:
             attempted = any(c.get("snapshot") for c in state.checks)
             info["score_kind"] = "infinity" if attempted else "nan"
             info["score_reason"] = "invalid_predictor" if attempted else "no_predictor"
             info["primary_joint_energy"] = None
-            info["reward_mapping"] = "missing or invalid predictor -> 0"
             return 0.0
         context = dict(
             trace_id=trace.id,
@@ -480,6 +536,8 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             models=sorted({call.model for call in trace.calls if call.model}),
             harness=trace.agent.config.harness.id,
             coding_interface=self.config.coding_interface,
+            reward_precision=self.config.tools.reward_precision,
+            reward_mapping=REWARD_MAPPING,
             agent_limits={
                 name: getattr(trace.agent.config, name, None)
                 for name in ("max_turns", "max_input_tokens", "max_output_tokens")
@@ -501,6 +559,7 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             bundle=required_bundle(self.config.tools),
             members=64,
             run_context=context,
+            execution_limits=self.config.tools.predictor_limits,
         )
         info["grade"] = grade
         score = grade["primary_joint_energy"]
@@ -508,8 +567,7 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
         info["primary_joint_energy"] = score
         # Preserve the lower-is-better scientific score. VF rewards are larger
         # is better; this monotone transform is explicit and recorded.
-        info["reward_mapping"] = "1 / (1 + primary_joint_energy); invalid contract -> 0"
-        return 1 / (1 + score) if score is not None else 0.0
+        return precision_reward(score, self.config.tools.reward_precision)
 
 
 class R6Taskset(vf.Taskset[R6Task, R6Config]):
@@ -517,8 +575,13 @@ class R6Taskset(vf.Taskset[R6Task, R6Config]):
 
     def load(self):
         required_bundle(self.config.task.tools)
-        protocol = PROTOCOL if self.config.task.coding_interface == "shell" else "r6-verifiers-v1-ipython-1"
+        protocol = (
+            PROTOCOL
+            if self.config.task.coding_interface == "shell"
+            else f"r6-verifiers-v1-ipython-1-{PROMPT_CONDITION}"
+        )
         n_ports = public_roster(self.config.task.tools).n_ports
+        protocol += "-k-" + precision_label(self.config.task.tools.reward_precision)
         if n_ports != 12:
             protocol += f"-ports-{n_ports}"
         if self.config.prompt != DEFAULT_PROMPT:

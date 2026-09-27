@@ -6,12 +6,15 @@ wrapper only supplies resource limits, JSON conversion and the callable API.
 
 import importlib.util
 import json
+import os
 import resource
 import sys
 from pathlib import Path
 
-resource.setrlimit(resource.RLIMIT_CPU, (20, 20))
-resource.setrlimit(resource.RLIMIT_FSIZE, (20 * 1024 * 1024, 20 * 1024 * 1024))
+cpu_seconds = int(os.environ.get("PHYSIM_PREDICTOR_CPU_SECONDS", "20"))
+resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+file_bytes = int(os.environ.get("PHYSIM_PREDICTOR_FILE_MIB", "20")) * 1024 * 1024
+resource.setrlimit(resource.RLIMIT_FSIZE, (file_bytes, file_bytes))
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 request = json.load(sys.stdin)
 if request["mode"] == "python":

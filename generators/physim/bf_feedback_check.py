@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from eval_preparation import make_oracle, write_json
+from eval_preparation import make_oracle, preparation_protocol, write_json
 from physim.bundles import digest
 
 
@@ -22,6 +22,8 @@ def run(preparation, output):
             if not coupled:
                 oracle._template["bilin"] = []
             actions = [dict(t=0, kind="inject", port=2, amp=0.05, dur=5)] if pulse else []
+            if actions and preparation_protocol(preparation) == "centered-pulse-v2":
+                actions[0]["device"] = 0
             key = f"{'coupled' if coupled else 'feedback_removed'}_{'pulse' if pulse else 'sham'}"
             arrays[key] = oracle.sample_truth(actions, queries, n_samples=3, truth_seed=53001)["samples"][0]
             print(key, flush=True)

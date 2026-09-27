@@ -1,10 +1,10 @@
-"""Centered apparatus with independently scheduled, location-latched source pulses.
+"""Isolated R6 absolute-time executable-predictor prototype (evaluator-side).
 
 ``Predictor.predict(actions, queries, n_samples=64, seed=0)`` describes the
 submitted-code API only. The privileged ``OracleRunner.sample_truth`` uses a
 separate grader-owned ``truth_seed`` namespace. Evaluators bind an opaque t=0
 scenario with the private factory. This module does not modify the R5 tools, caches, truths, or transport.
-The fixed-source historical protocol is preserved in legacy_v1.
+See probes/blobs/agentenv/round6/runner/DESIGN.md for the supported grammar.
 """
 from __future__ import annotations
 
@@ -28,8 +28,6 @@ DEFAULT_SAMPLES = 64
 MAX_SEED = 2**64 - 1
 MAX_EXACT_TICK = 2**53 - 1        # numerical representation bound, not a budget
 NOISE_POLICY = "independent-experiment-v1"
-APPARATUS_PROTOCOL = "centered-pulse-v2"
-LEGACY_PROTOCOL = "fixed-source-v1"
 
 
 class ProtocolError(ValueError):
@@ -104,7 +102,7 @@ def _parse(actions, queries, n_samples, truth_seed, n_ports, devices):
         raise ProtocolError("actions and queries must be lists")
     parsed_actions = []
     previous_start = -1
-    lane_ends = {}
+    lane_ends = {"adjust": -1, "inject": -1}
     for i, obj in enumerate(actions):
         label = f"actions[{i}]"
         if type(obj) is not dict:
@@ -113,17 +111,16 @@ def _parse(actions, queries, n_samples, truth_seed, n_ports, devices):
         if type(kind) is not str or kind not in ("adjust", "inject"):
             raise ProtocolError(f"{label}.kind must be 'adjust' or 'inject'")
         required = ({"t", "kind", "device", "u"} if kind == "adjust"
-                    else {"t", "kind", "device", "port", "amp", "dur"})
+                    else {"t", "kind", "port", "amp", "dur"})
         _keys(obj, required, label)
         k = _tick(obj["t"], label + ".t")
-        if k < previous_start:
-            raise ProtocolError("actions must have nondecreasing start times; "
-                                "equal-time actions execute in list order")
-        di = _integer(obj["device"], label + ".device", 0, len(devices) - 1)
-        lane = (di, kind)
-        if k < lane_ends.get(lane, -1):
-            raise ProtocolError(f"overlapping {kind} intervals for device {di} are unsupported")
+        if k <= previous_start:
+            raise ProtocolError("actions must have strictly increasing start times; "
+                                "simultaneous starts are unsupported")
+        if k < lane_ends[kind]:
+            raise ProtocolError(f"overlapping {kind} intervals are unsupported")
         if kind == "adjust":
+            di = _integer(obj["device"], label + ".device", 0, len(devices) - 1)
             u = obj["u"]
             if type(u) is not list or len(u) != 3:
                 raise ProtocolError(f"{label}.u must be a list of three numbers")
@@ -142,11 +139,11 @@ def _parse(actions, queries, n_samples, truth_seed, n_ports, devices):
             dur_ticks = _tick(obj["dur"], label + ".dur")
             if dur_ticks < 1:
                 raise ProtocolError(f"{label}.dur must span at least one dt tick")
-            action = _Action(k, k + dur_ticks, kind, device=di, port=port, amp=amp)
+            action = _Action(k, k + dur_ticks, kind, port=port, amp=amp)
         if action.end > MAX_EXACT_TICK:
             raise ProtocolError(f"{label} interval exceeds the exact tick range")
         parsed_actions.append(action)
-        lane_ends[lane] = action.end
+        lane_ends[kind] = action.end
         previous_start = k
 
     parsed_queries = []
@@ -235,7 +232,7 @@ class OracleRunner:
     """
 
     def __init__(self, *, _template, _devices, _port_perm, _adjust_mix,
-                 _stepper: Callable):
+                 _emitter_yx, _stepper: Callable):
         fields = np.asarray(_template["F"])
         if (fields.ndim != 3 or fields.shape[-1] != fields.shape[-2]
                 or fields.dtype not in (np.dtype("float32"), np.dtype("float64"))
@@ -250,6 +247,9 @@ class OracleRunner:
         mix = np.asarray(_adjust_mix, float)
         if mix.shape != (3, 3) or not np.isfinite(mix).all():
             raise ValueError("private actuator template is invalid")
+        emitter = np.asarray(_emitter_yx, float)
+        if emitter.shape != (2,) or not np.isfinite(emitter).all():
+            raise ValueError("private emitter template is invalid")
         if not _devices or any(int(d.k) < 1 for d in _devices):
             raise ValueError("private anonymous device roster is empty or invalid")
         if not isinstance(_template["rng"], np.random.Generator):
@@ -262,6 +262,7 @@ class OracleRunner:
         self._devices = deepcopy(tuple(_devices))
         self._perm = np.array(perm, dtype=int, copy=True)
         self._mix = mix.copy()
+        self._emitter = emitter.copy()
         self._stepper = _stepper
 
     def _sample(self, sim, devices, sensor):
@@ -282,12 +283,12 @@ class OracleRunner:
                 values[sensor] = self._sample(sim, devices, sensor)
             output[qi][member, ti] = values[sensor]
 
-    def _advance(self, sim, tick, injections=()):
+    def _advance(self, sim, tick, injection=None):
         n = tick - sim["t_step"]
         if n < 0:
             raise RuntimeError("internal scheduler attempted to reverse time")
         if n:
-            self._stepper(sim, n, injections=list(injections))
+            self._stepper(sim, n, injections=[] if injection is None else [injection])
             if sim["t_step"] != tick:
                 raise RuntimeError("native stepper did not reach its scheduled tick")
 
@@ -295,9 +296,8 @@ class OracleRunner:
         """Privately sample truth with a grader-owned seed, not predictor seed.
 
         Return {"samples": [array per query]} with coherent member trajectories.
-        All times are absolute, finite dt ticks. Action starts are nondecreasing;
-        equal-time actions execute in list order. Each source pulse latches its
-        device center at launch. Validate the whole request before simulation.
+        All times are absolute, finite dt ticks. Action starts must be strictly
+        increasing. Validate the whole request before running any simulation.
         Empty outputs are legal. Containers are float64, without rounding or
         private metadata. A public request's ``seed`` key is NOT accepted here.
 
@@ -320,29 +320,29 @@ class OracleRunner:
             return {"samples": output}
         last = max(marks)
         effective = tuple(a for a in effective if a.tick <= last)
-        starts = defaultdict(list)
-        for action in effective:
-            starts[action.tick].append(action)
+        starts = {a.tick: a for a in effective}
         ends = {a.end for a in effective if a.kind == "inject" and a.end <= last}
         agenda = sorted(set(marks) | set(starts) | ends)
         for member in range(n_samples):
             live = _clone_sim(self._template)
             live["rng"] = np.random.default_rng(_truth_member_seed(truth_seed, member))
             devices = deepcopy(self._devices)
-            active = {}
+            active = None
+            active_end = -1
             for tick in agenda:
-                # Stable device order makes forcing independent of dict insertion order.
-                self._advance(live, tick, [active[i][1] for i in sorted(active)])
-                active = {i: pulse for i, pulse in active.items() if pulse[0] > tick}
-                # End intervals, execute equal-time actions in list order, then read.
-                for a in starts.get(tick, ()):
+                self._advance(live, tick, active)
+                # Half-open source interval: finish, start, sample, then advance.
+                if tick == active_end:
+                    active = None
+                a = starts.get(tick)
+                if a is not None:
                     if a.kind == "adjust":
                         _adjust_pose(devices[a.device], a.u, self._mix)
                     else:
-                        center = devices[a.device].center
-                        active[a.device] = (a.end, dict(
-                            field=int(self._perm[a.port]), y=float(center[0]),
-                            x=float(center[1]), amp=a.amp))
+                        active = dict(field=int(self._perm[a.port]),
+                                      y=float(self._emitter[0]),
+                                      x=float(self._emitter[1]), amp=a.amp)
+                        active_end = a.end
                 self._fill_queries(live, devices, marks.get(tick, ()), output, member)
         return {"samples": output}
 
@@ -372,4 +372,5 @@ def _native_oracle(world: str, hidden_seed: int, *, workers: int = 1) -> OracleR
     return OracleRunner(_template=template, _devices=devices,
                      _port_perm=secrets["port_perm"],
                      _adjust_mix=B.adjust_mix(B.world_key(world, hidden_seed)),
+                     _emitter_yx=secrets["devices"][B.DEV_A]["center"],
                      _stepper=B.agdev.step_chunk)

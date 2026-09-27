@@ -5,15 +5,43 @@ An agent uses a coding harness to collect observations, then submits
 `predict(actions, queries, n_samples=64, seed=0)`. The host grades coherent sample
 trajectories against independent retained physical realizations.
 
+## Apparatus update in development
+
+The development package is `0.13.0.dev0`. New preparations use `centered-pulse-v2`: each instrument has a source at its
+sensor-array center. `inject` requires `device`. Launch captures the current
+center; the finite-duration forcing stays there after later motion. Devices
+have independent movement/injection lanes. Equal-time actions execute in list
+order, so move-then-inject and inject-then-move select different launch positions.
+Sensor dilation leaves the source centered and does not change its width.
+
+Published configs and HF bundles still use `fixed-source-v1`. Loading one selects
+its frozen simulator, scoring implementation, agent instructions, and interface
+checks. Existing truth is never relabeled as the new apparatus. The updated
+apparatus has protocol tests and fresh local preparations and rollouts, including
+the [BF case study](https://github.com/swpo/physim/blob/main/BF_CASE_STUDY.md). Publishing those new bundles and a new
+package release are separate steps; the existing release pins retain their
+original scientific condition.
+
+The development package also includes the
+[Prime Agent harness adapter](PRIME_AGENT.md), interface-only prompts, and
+cross-platform artifact handling used for the newer rollouts. The adapter's
+guide covers Docker setup, a zero-cost integration check, and campaign tooling.
+
 ## Installation
 
-Use Python 3.12 and install the environment from the repository root:
+Use Python 3.12 and install from the repository root:
+
+```sh
+uv sync --all-extras
+```
+
+An editable installation of just the packages is also supported:
 
 ```sh
 uv pip install -e './environments/physim[reference,hub]'
 ```
 
-Physim 0.12.2 depends on blobkit 0.3.5 and Verifiers 0.3.1–0.3.x. The `reference`
+The published Physim 0.12.2 release depends on blobkit 0.3.5 and Verifiers 0.3.1–0.3.x. The `reference`
 extra pins NumPy 2.5.2 and SciPy 1.18.0; `hub` adds immutable Hugging Face downloads.
 The empty `agent` extra is retained for old installation commands.
 
@@ -54,7 +82,7 @@ contains no private physics arrays or grading truths. See [DATA_SOURCES.md](DATA
 The bundle determines the public port count: BF uses four, XV six, and the
 original reference twelve. Each uses the same 13-node and 19-node probes, global
 mean/variance readings, 50-tu contract and native scheduler. Stationary channels
-may have zero diffusion. See the [archived preparation recipes](https://huggingface.co/datasets/seanpohorence/physim-worlds/tree/dcd6abd5eae76a47f326c70518315d2d1e101d86/registry)
+may have zero diffusion. See the [preparation workflow](../../generators/physim/EVALUATION_WORKFLOW.md)
 for the scientific checks, independent truth generation and registry export.
 
 From the repository root, build the isolated predictor and agent images:
@@ -170,7 +198,7 @@ uv run eval @ configs/physim/eval.toml -m YOUR_MODEL_ID \
 Omitting a turn or token limit from a copied config leaves that native Verifiers
 limit unset. Model context windows and provider limits still apply. The experiment
 service supports up to 1,000,000 total tu. Each independent experiment retains its
-50-tu physical horizon.
+50-tu physical horizon. The BF/XV pilot configs retain their recorded smaller budgets.
 
 These settings govern exploration. The submitted predictor currently runs under
 separate grading limits: one CPU, 1 GB, and 30 seconds per prediction. Increasing
@@ -194,7 +222,15 @@ There is no custom model loop. The agent has no network access by default.
 ## Reward and reference checks
 
 Lower joint energy is better. The task maps it to Verifiers reward as
-`1 / (1 + primary_joint_energy)`. An otherwise completed rollout with a missing
+`max(0, min(-log10(S), K)) / K`, applied once to the mean energy `S`.
+Zero energy maps to reward one; energies at least one map to zero.
+Set `env.taskset.task.tools.reward_precision` to choose positive, finite `K`
+(default: `2`, full reward at `S <= 0.01`). The prompt discloses this target;
+it does not change experiment or inference budgets. `K` measures orders of
+magnitude in normalized error, not decimal places of literal accuracy.
+The calibration recipe is `python -m scripts.calibrate_reward` in the development
+repository; it uses independent native forecasts on the frozen suites.
+An otherwise completed rollout with a missing
 or invalid predictor receives zero reward. Infrastructure failures remain native
 Verifiers errors.
 The disclosed reference world does not measure unfamiliar-world generalization.
@@ -212,13 +248,4 @@ service, scoring code, and CPU kernels retain their scientific identities.
 Physim and blobkit code are Apache-2.0; the reference data are CC-BY-4.0. The chosen
 dataset is [seanpohorence/physim-worlds](https://huggingface.co/datasets/seanpohorence/physim-worlds/tree/dcd6abd5eae76a47f326c70518315d2d1e101d86), published and verified at
 `dcd6abd5eae76a47f326c70518315d2d1e101d86`. See [DATA_SOURCES.md](DATA_SOURCES.md)
-for scope and the personal project's [release instructions](https://github.com/swpo/physim/blob/main/RELEASING.md).
-
-## Prepare and contribute worlds
-
-The [portable preparation workflows](../../generators/physim/README.md) use the
-published HF registry and installed Blobkit to reproduce BF/XV preparations, run
-fresh simulations, freeze suites, generate truth, and validate runnable bundles.
-Research and general Blobkit development live in the
-[personal project](https://github.com/swpo/physim); published world data and
-provenance live on [HF](https://huggingface.co/datasets/seanpohorence/physim-worlds).
+for the scope and the release commands in the repository's `RELEASING.md`.

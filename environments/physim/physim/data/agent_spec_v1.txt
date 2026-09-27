@@ -26,10 +26,10 @@ within that experiment.
 The `inject` command accepts these keys:
 
 ```json
-{"t": 1.0, "kind": "inject", "device": 0, "port": {example_port}, "amp": 0.7, "dur": 4.0}
+{"t": 1.0, "kind": "inject", "port": {example_port}, "amp": 0.7, "dur": 4.0}
 ```
 
-`device` is 0 or 1. `port` is an integer from 0 to {last_port}. `amp` is a finite
+`port` is an integer from 0 to {last_port}. `amp` is a finite
 number in [0,3]; zero is permitted. `dur` is in (0,50] and must be a multiple
 of 0.02. This command occupies the interval [t,t+dur) for scheduling purposes.
 Learn how these inputs affect subsequent measurements through experiments.
@@ -44,13 +44,12 @@ The `adjust` command accepts these keys:
 An adjustment takes effect at its timestamp and occupies [t,t+5) for scheduling
 purposes. Discover what each control does from the measurements.
 
-For each device, intervals of the same action kind must not overlap. Intervals
-of different kinds, or for different devices, may overlap. Adjacent endpoints
-are allowed. These constraints apply even when input values are zero.
+Intervals of the same action kind must not overlap, including `adjust` commands
+for different devices. Intervals of different kinds may overlap. Adjacent
+endpoints are allowed. These constraints apply even when input values are zero.
 
-List actions in nondecreasing start-time order. At equal times, actions execute
-in list order, before measurements requested at that time. Changing that order
-can change the result.
+List actions in strictly increasing start-time order; simultaneous starts are
+unsupported. Actions execute before measurements requested at the same time.
 
 ### Measurement requests
 

@@ -12,7 +12,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from eval_preparation import make_oracle, write_json
+from eval_preparation import make_oracle, preparation_protocol, write_json
 from physim import blobround6 as R6
 from physim import blobround6_eval as scoring
 from physim.bundles import FORMAT, NUMERICS, Bundle, digest, identified, implementation_identity, load_arrays
@@ -52,6 +52,19 @@ def score_groups(case, permutation):
     return groups
 
 
+def disable_shared_feedback(state):
+    """Remove channel-to-activator feedback from channels with multiple drivers.
+
+    Wf is channels × activators; Kf is activators × channels. Neither is
+    generally square. Channel production, initial fields and noise stay intact.
+    """
+    shared = np.count_nonzero(state["Wf"], axis=1) > 1
+    if state["Kf"].shape != state["Wf"].T.shape or not shared.any():
+        raise ValueError("Expected rectangular couplings with shared channels")
+    state["Kf"] = state["Kf"].copy()
+    state["Kf"][:, shared] = 0
+
+
 def generate_case(preparation, record, output, index):
     output = Path(output)
     case = record["request"]
@@ -82,6 +95,8 @@ def generate_case(preparation, record, output, index):
         elif name == "remove_feedback":
             if len(native._perm) == 4:
                 native._template["bilin"] = []
+            elif len(native._perm) == 12:
+                disable_shared_feedback(native._template)
             else:
                 # XV's cross-drive source rows; original preparation retained.
                 for key in ("Wf", "Wid"):
@@ -95,13 +110,18 @@ def generate_case(preparation, record, output, index):
         np.savez_compressed(saved, **{f"query{i}": a for i, a in enumerate(controls[name]["samples"])})
     sensors = ["device0", "device1", "global"]
     initial = oracle.sample_truth([], [dict(sensor=s, t=[0]) for s in sensors], n_samples=1, truth_seed=0)
-    roster = scoring.PublicRoster(n_ports=len(oracle._perm))
+    roster = scoring.PublicRoster(n_ports=len(oracle._perm), protocol=preparation_protocol(preparation))
     model = scoring.PersistencePredictor(dict(zip(sensors, [a[0, 0] for a in initial["samples"]])), roster=roster)
     controls["initial_persistence"] = model.predict(case["actions"], case["queries"], n_samples=4)
+    score_module = scoring
+    if roster.protocol == R6.LEGACY_PROTOCOL:
+        from physim.legacy_v1 import blobround6_eval as score_module
     results = {}
     for name, pred in controls.items():
         np.savez_compressed(control_dir / (name + ".npz"), **{f"query{i}": a for i, a in enumerate(pred["samples"])})
-        result = scoring.score_case(case, pred, truth, groups=record["groups"], roster=roster, n_samples=4, n_truth=2)
+        result = score_module.score_case(
+            case, pred, truth, groups=record["groups"], roster=roster, n_samples=4, n_truth=2
+        )
         results[name] = result
     write_json(control_dir / "scores.json", results)
     print(f"{case['id']}: truth + independent forecast controls complete", flush=True)
@@ -122,26 +142,41 @@ def build(source, output, workers=3, resume=False):
             shutil.copyfile(prep / name, output / name)
     origin = json.loads((prep / "origin.json").read_text())
     apparatus = json.loads((prep / "apparatus.json").read_text())
+    protocol = preparation_protocol(prep)
+    score_module = scoring
+    if protocol == R6.LEGACY_PROTOCOL:
+        from physim.legacy_v1 import blobround6_eval as score_module
+    if origin["implementation"] != implementation_identity(protocol):
+        raise ValueError("Preparation implementation differs; create new preparation and science evidence")
     programs = json.loads((source / "programs.json").read_text())
     cases = []
     for index, program in enumerate(programs):
         # Every admitted action program has independent-noise development evidence.
         receipt = json.loads((source / "science" / program["id"] / "receipt.json").read_text())
         assert receipt["request"] == program
+        assert receipt["implementation"] == implementation_identity(protocol), "Science evidence uses another runtime"
         assert digest(source / "science" / program["id"] / "observations.npz") == receipt["observations_sha256"]
         case = dict(program, id=f"c{index + 1:03d}")
         cases.append(
             dict(
                 request=case,
                 family=program["id"],
-                groups=score_groups(case, apparatus["port_permutation"]),
+                groups=(
+                    json.loads((source / "score_groups.json").read_text())[program["id"]]
+                    if (source / "score_groups.json").exists()
+                    else score_groups(case, apparatus["port_permutation"])
+                ),
                 truth=f"truth/{case['id']}.npz",
             )
         )
     suite = dict(
         schema_version="physim-suite-v1",
         scoring_version=scoring.VERSION,
-        contract_version=f"r6-absolute-time-{len(apparatus['port_permutation'])}-port-v1",
+        contract_version=(
+            f"r6-absolute-time-{len(apparatus['port_permutation'])}-port-v1"
+            if protocol == R6.LEGACY_PROTOCOL
+            else R6.APPARATUS_PROTOCOL
+        ),
         forecast_members=64,
         truth_members=2,
         predictor_seed=20260913,
@@ -198,7 +233,7 @@ def build(source, output, workers=3, resume=False):
             name=origin["world"],
             genome_sha256=digest(output / "world.json"),
             numerics=NUMERICS,
-            implementation=implementation_identity(),
+            implementation=implementation_identity(protocol),
         ),
     )
     objects["preparation"] = identified(
@@ -219,7 +254,7 @@ def build(source, output, workers=3, resume=False):
         dict(
             preparation_id=objects["preparation"]["id"],
             file_sha256=digest(output / "suite.json"),
-            scoring_source_sha256=digest(scoring.__file__),
+            scoring_source_sha256=digest(score_module.__file__),
             truth_sha256={c["truth"]: digest(output / c["truth"]) for c in cases},
         ),
     )

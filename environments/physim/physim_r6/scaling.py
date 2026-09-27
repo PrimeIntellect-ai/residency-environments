@@ -1,4 +1,4 @@
-"""Budgeted R6 task hooks for stock Verifiers harnesses; no model/harness loop."""
+"""Spend accounting with optional budget hooks for stock Verifiers harnesses."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from physim import taskset as T
 
 
 class SpendConfig(vf.TaskConfig):
-    limit_usd: float = Field(gt=0, le=25)
+    limit_usd: float | None = Field(None, gt=0, allow_inf_nan=False)
     input_usd_per_mtok: float = Field(ge=0)
     output_usd_per_mtok: float = Field(ge=0)
     cache_read_usd_per_mtok: float | None = Field(None, ge=0)
@@ -79,21 +79,24 @@ class ScalingTask(T.R6Task):
         super().__init__(data, config)
 
     async def setup(self, trace, runtime):
-        if trace.agent.config.harness.id != "bash":
-            raise vf.TaskError("This spend policy is scoped to the stock sequential Bash harness")
+        if trace.agent.config.harness.id not in {"bash", "physim_prime_agent"}:
+            raise vf.TaskError("This spend policy requires a verified harness with native request interception")
+        if trace.agent.config.harness.id == "physim_prime_agent" and self.config.spend.limit_usd is not None:
+            raise vf.TaskError("Prime Agent accounting does not implement concurrent dollar-budget admission")
         sampling = trace.agent.config.sampling
         if sampling is None or sampling.max_tokens != self.config.spend.max_response_tokens:
             raise vf.TaskError("Response token cap must match the spend reserve configuration")
         await super().setup(trace, runtime)
         trace.info["r6"]["scaling"] = dict(
             spend_config=self.config.spend.model_dump(),
-            task_policy="Same public task and scientific inputs; native dollar stop only.",
+            task_policy="Same public task and scientific inputs; spend accounting with an optional dollar stop.",
         )
 
     @vf.stop(priority=-1)
-    async def dollar_budget(self, trace) -> bool:
+    async def dollar_budget(self, trace: vf.Trace) -> bool:
         budget = spend_accounting(trace, self.config.spend)
-        stop = budget["accounted_cost_usd"] + budget["next_call_reserve_usd"] > budget["limit_usd"] + 1e-12
+        limit = budget["limit_usd"]
+        stop = limit is not None and budget["accounted_cost_usd"] + budget["next_call_reserve_usd"] > limit + 1e-12
         trace.info.setdefault("r6", {})["spend"] = dict(budget, stopped=stop)
         if trace.state.output:
             T.E.dump(Path(trace.state.output) / "spend_state.json", dict(budget, stopped=stop))
@@ -113,5 +116,6 @@ class R6ScalingTaskset(vf.Taskset[ScalingTask, ScalingConfig]):
     def load(self):
         original = T.R6Taskset(T.R6Config(id="physim_r6", task=self.config.task, prompt=self.config.prompt))
         for task in original.load():
-            data = task.data.model_copy(update={"protocol": task.data.protocol + "-dollar-budget-v1"})
+            suffix = "-spend-accounting-v1" if self.config.task.spend.limit_usd is None else "-dollar-budget-v1"
+            data = task.data.model_copy(update={"protocol": task.data.protocol + suffix})
             yield ScalingTask(data, self.config.task)

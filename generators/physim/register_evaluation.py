@@ -57,7 +57,15 @@ def register(source, registry_root, name, *, pilot_config=None, source_archives=
     upstream = Path(origin["source"])
     if not upstream.is_absolute():
         upstream = ROOT / upstream
-    if digest(upstream / "final_state.npz") != origin["source_fields_sha256"]:
+    from_bundle = "previous_bundle" in origin
+    if from_bundle:
+        previous = Bundle(upstream)
+        if previous.references() != origin["previous_bundle"]:
+            raise ValueError("Original evaluation bundle changed")
+        for filename in ("world.json", "preparation.npz"):
+            if digest(previous.verified_path(filename)) != digest(source / "preparation" / filename):
+                raise ValueError("Original world or prepared fields changed")
+    elif digest(upstream / "final_state.npz") != origin["source_fields_sha256"]:
         raise ValueError("Original simulation fields changed")
 
     artifacts = {
@@ -71,8 +79,10 @@ def register(source, registry_root, name, *, pilot_config=None, source_archives=
         "control_summary.json",
         "preparation/origin.json",
         "programs.json",
+        "score_groups.json",
         "pilot_summary.json",
         "causal/result.json",
+        "causal/readings.npz",
         "causal_extended/result.json",
     ):
         if (source / relative).is_file():
@@ -101,18 +111,23 @@ def register(source, registry_root, name, *, pilot_config=None, source_archives=
     # state. The upstream initialization protocol and executed sources are also
     # preserved, so the longer generation history remains inspectable.
     sources = {}
-    for p in sorted(upstream.glob("*")):
-        if p.name in (
-            "genome.json",
-            "final_state.npz",
-            "protocol.json",
-            "rotation.json",
-            "summary.json",
-            "download.json",
+    for p in sorted(upstream.rglob("*") if from_bundle else upstream.glob("*")):
+        if p.is_file() and (
+            from_bundle
+            or p.name
+            in (
+                "genome.json",
+                "final_state.npz",
+                "protocol.json",
+                "rotation.json",
+                "summary.json",
+                "download.json",
+            )
         ):
-            sources["inputs/original/" + p.name] = registry.artifact(p.read_bytes())
+            sources["inputs/original/" + p.relative_to(upstream).as_posix()] = registry.artifact(p.read_bytes())
     for filename in (
         "eval_preparation.py",
+        "prepare_centered_reference.py",
         "build_evaluation_bundle.py",
         "bf_feedback_check.py",
         "xv_feedback_check.py",
@@ -130,15 +145,17 @@ def register(source, registry_root, name, *, pilot_config=None, source_archives=
         for path in sorted(archive.rglob("*")):
             if path.is_file():
                 sources["executed/" + digest(path) + "/" + path.name] = registry.artifact(path.read_bytes())
+    entrypoint = "generators/physim/" + ("prepare_centered_reference.py" if from_bundle else "eval_preparation.py")
+    world_argument = "" if from_bundle else f" --world {origin['world']}"
     recipe = registry.put(
         "recipe",
         dict(
             name=name + "_preparation",
             kind="prepared-evaluation",
             sources=sources,
-            entrypoint="generators/physim/eval_preparation.py",
-            command=f"python generators/physim/eval_preparation.py --world {origin['world']} --source inputs/original --output replay",
-            upstream_protocol=sources["inputs/original/protocol.json"],
+            entrypoint=entrypoint,
+            command=f"python {entrypoint}{world_argument} --source inputs/original --output replay",
+            upstream_protocol=sources["inputs/original/" + ("manifest.json" if from_bundle else "protocol.json")],
             implementation=origin["implementation"],
             note="Recipe replay creates new data files; the preserved bundle is the byte-exact evaluation release.",
         ),

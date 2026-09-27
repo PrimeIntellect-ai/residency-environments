@@ -33,11 +33,8 @@ class EvaluationError(ValueError):
 class PublicRoster:
     n_ports: int = 12
     device_slots: tuple[int, ...] = (13, 19)
-    protocol: str = R6.APPARATUS_PROTOCOL
 
     def __post_init__(self):
-        if self.protocol not in (R6.APPARATUS_PROTOCOL, R6.LEGACY_PROTOCOL):
-            raise EvaluationError("unsupported apparatus protocol")
         if (type(self.n_ports) is not int or not 1 <= self.n_ports <= 128
                 or type(self.device_slots) is not tuple
                 or not 1 <= len(self.device_slots) <= 16
@@ -140,12 +137,9 @@ def validate_case(case, *, roster=DEFAULT_ROSTER, limits=DEFAULT_LIMITS, allow_e
         if start < 0 or start + duration > limits.max_horizon_tu:
             raise EvaluationError("action interval exceeds the evaluation horizon")
     devices = [SimpleNamespace(k=k) for k in roster.device_slots]
-    protocol = R6
-    if roster.protocol == R6.LEGACY_PROTOCOL:
-        from .legacy_v1 import blobround6 as protocol
     try:
-        _, parsed_queries, _, _ = protocol._parse(actions, queries, 1, 0, roster.n_ports, devices)
-    except protocol.ProtocolError as exc:
+        _, parsed_queries, _, _ = R6._parse(actions, queries, 1, 0, roster.n_ports, devices)
+    except R6.ProtocolError as exc:
         raise EvaluationError(str(exc)) from None
     # Public requests use chronological, unique times per query. Compare native
     # ticks so distinct float spellings of the same instant cannot slip through.

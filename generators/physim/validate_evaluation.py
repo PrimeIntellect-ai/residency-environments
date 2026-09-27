@@ -18,6 +18,8 @@ def validate(source):
     service = ExperimentService(bundle.make_oracle(), roster=roster, max_experiments=2, max_total_tu=1)
     queries = [dict(sensor=sensor, t=[0, 0.02]) for sensor in ("device0", "device1", "global")]
     action = dict(t=0, kind="inject", port=roster.n_ports - 1, amp=0.1, dur=0.02)
+    if roster.protocol == "centered-pulse-v2":
+        action["device"] = 0
     observed = service.experiment([action], queries)
     shapes = [list(array.shape) for array in observed["samples"]]
     if shapes != [[1, 2, roster.n_ports, slots] for slots in (13, 19, 2)]:
