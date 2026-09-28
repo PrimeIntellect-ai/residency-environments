@@ -86,8 +86,9 @@ class CarlaToolset(vf.Toolset[vf.ToolsetConfig, CarlaState]):
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
+        timeout = self._task_data.carla_startup_timeout_s or None
         try:
-            async with asyncio.timeout(180):
+            async with asyncio.timeout(timeout):
                 while True:
                     if self._carla_process.returncode is not None:
                         raise RuntimeError(

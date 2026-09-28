@@ -17,7 +17,7 @@ class FreeRoamConfig(NavigationConfig):
     enable_vision: bool = True
     vision_only: bool = False
     random_goal: bool = False
-    max_steps: int = 500
+    max_steps: int | None = 500
     coverage_cell_m: float = COVERAGE_CELL_M
     coverage_target_cells: int = COVERAGE_TARGET_CELLS
 
@@ -160,8 +160,6 @@ class FreeRoamScenario(NavigationScenario):
         state["info"] = info
 
     def is_done(self, state: Any) -> bool:
-        if int(state.get("env_step", 0)) >= int(self.config.max_steps):
-            return True
         # End on collision to prevent crashed policies from recovering reward.
         runtime = state.get("carla")
         if runtime is not None and self._distinct_collision_count(runtime) > 0:
