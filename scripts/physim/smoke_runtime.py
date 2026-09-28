@@ -27,7 +27,7 @@ def predict(actions, queries, n_samples=64, seed=0):
 
 # Printed results are booleans only: never dump environment values, process
 # arguments, framework connection credentials, or arbitrary runtime files.
-BOUNDARY_PROBE = """import importlib.util, json, os, socket, urllib.request
+BOUNDARY_PROBE = """import importlib.util, json, os, socket, ssl, urllib.request
 from pathlib import Path
 checks = {}
 checks['private_packages_absent'] = all(importlib.util.find_spec(x) is None for x in ['physim', 'blobkit'])
@@ -39,12 +39,19 @@ for name, url in [('hf', 'https://huggingface.co/'), ('github', 'https://github.
             checks[name + '_blocked'] = response.status == 403
     except Exception:
         checks[name + '_blocked'] = True
-try:
-    connection = socket.create_connection(('1.1.1.1', 443), timeout=2)
-    connection.close()
-    checks['direct_network_blocked'] = False
-except OSError:
-    checks['direct_network_blocked'] = True
+# A filtering proxy can accept TCP before rejecting the TLS/data exchange.
+# Disable certificate verification so a certificate error cannot masquerade as isolation.
+for name, server_name in [('direct_tls_sni', 'one.one.one.one'), ('direct_tls_ip', None)]:
+    try:
+        with socket.create_connection(('1.1.1.1', 443), timeout=3) as connection:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            with context.wrap_socket(connection, server_hostname=server_name) as tls:
+                tls.sendall(b'GET / HTTP/1.1\\r\\nHost: one.one.one.one\\r\\nConnection: close\\r\\n\\r\\n')
+                checks[name + '_blocked'] = not bool(tls.recv(64))
+    except OSError:
+        checks[name + '_blocked'] = True
 print(json.dumps({'boundary_audit': checks}))
 assert all(checks.values())
 """
@@ -73,7 +80,11 @@ def main(args):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             index = sum(len(m.get("tool_calls") or []) for m in body["messages"] if m["role"] == "assistant")
             calls.append(body)
-            if index < len(steps):
+            audit_failed = any(
+                m["role"] == "tool" and '"boundary_audit"' in m.get("content", "") and "false" in m["content"].lower()
+                for m in body["messages"]
+            )
+            if index < len(steps) and not audit_failed:
                 name, arguments = steps[index]
                 names = [t["function"]["name"] for t in body.get("tools", [])]
                 assert name in names, (name, names)
@@ -90,7 +101,8 @@ def main(args):
                 )
                 reason = "tool_calls"
             else:
-                message, reason = dict(role="assistant", content="Submitted."), "stop"
+                content = "Boundary audit failed; stopping." if audit_failed else "Submitted."
+                message, reason = dict(role="assistant", content=content), "stop"
             response = dict(
                 id=f"offline-{index}",
                 object="chat.completion",
