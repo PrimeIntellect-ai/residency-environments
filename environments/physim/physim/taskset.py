@@ -32,10 +32,9 @@ from .sandbox import ExecutionLimits, SandboxInfrastructureError
 PROMPT_CONDITION = "interface-only-v3-log-reward"
 PROTOCOL = f"r6-verifiers-v1-bash-1-{PROMPT_CONDITION}"
 AGENT_IMAGE = PUBLIC_IMAGE
-DEFAULT_BUNDLE = dict(
+DEFAULT_CATALOG = dict(
     repo="seanpohorence/physim-worlds",
-    revision="552229e61813b5684be2051349d778acea054922",
-    path="bundles/bf_trail_lab_centered_v2/38d159a8052bb0fc24d0d8feefe3985ac645fb19954f2c84aa54954a948b561e",
+    revision="bd77a0da2f14eef352bd80c4a38dff426e5c1bed",
 )
 DEFAULT_OUTPUT = Path("outputs/r6/artifacts")
 DEFAULT_PROMPT = "Investigate the laboratory and submit your executable predictor."
@@ -59,12 +58,15 @@ class R6State(vf.State):
     rejected_requests: list[dict] = Field(default_factory=list)
 
 
-class HubBundleConfig(BaseModel):
+class HubCatalogConfig(BaseModel):
     repo: str
     revision: str = Field(pattern=r"^[0-9a-f]{40}$")
-    path: str
     cache: Path | None = None
     offline: bool = False
+
+
+class HubBundleConfig(HubCatalogConfig):
+    path: str
 
 
 class R6ToolsConfig(vf.ToolsetConfig):
@@ -97,6 +99,15 @@ class R6TaskConfig(vf.TaskConfig):
 class R6Config(vf.TasksetConfig):
     task: R6TaskConfig = R6TaskConfig()
     prompt: str = DEFAULT_PROMPT
+    catalog: HubCatalogConfig = HubCatalogConfig(**DEFAULT_CATALOG)
+    bundles: list[Path | HubBundleConfig] | None = Field(None, min_length=1)
+
+    @model_validator(mode="after")
+    def unambiguous_selection(self):
+        tools = self.task.tools
+        if self.bundles is not None and (tools.bundle is not None or tools.bundle_source is not None):
+            raise ValueError("Select bundles or a single task.tools bundle, not both")
+        return self
 
 
 def required_bundle(config: R6ToolsConfig, *, profile="evaluation") -> Bundle:
@@ -104,7 +115,9 @@ def required_bundle(config: R6ToolsConfig, *, profile="evaluation") -> Bundle:
     if path is None:
         from physim.hub import fetch_bundle
 
-        source = config.bundle_source or HubBundleConfig(**DEFAULT_BUNDLE)
+        source = config.bundle_source
+        if source is None:
+            raise ValueError("The taskset must select a bundle before constructing a laboratory")
         path = fetch_bundle(**source.model_dump(), profile=profile)
     bundle = Bundle(path, profile=profile)
     bundle.check_runtime()
@@ -391,10 +404,35 @@ class LaboratoryTools(vf.Toolset[R6ToolsConfig, R6State]):
 
 class R6Data(vf.TaskData):
     protocol: str = PROTOCOL
+    # Evaluator wire data, not part of the model's prompt or workspace.
+    bundle: Path | None = None
+    bundle_source: HubBundleConfig | None = None
+    bundle_id: str = Field(pattern=r"^bundle:sha256:[0-9a-f]{64}$")
+    world_name: str
+
+    @model_validator(mode="after")
+    def selected_bundle(self):
+        if (self.bundle is None) == (self.bundle_source is None):
+            raise ValueError("Task data must select exactly one bundle")
+        return self
 
 
 class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
     NEEDS_CONTAINER = True
+
+    def __init__(self, data, config=None):
+        # EnvServer reconstructs tasks from their data and the shared config.
+        # Resolve selection here so remote workers use the same lab as the loader.
+        config = (config or R6TaskConfig()).model_copy(deep=True)
+        config.tools.bundle = data.bundle
+        config.tools.bundle_source = data.bundle_source.model_copy(deep=True) if data.bundle_source else None
+        super().__init__(data, config)
+        self._runtime_access: dict[str, RuntimeAccess] = {}
+
+    @property
+    def key(self):
+        identity = self.data.model_dump(mode="json", exclude={"idx", "bundle", "bundle_source"})
+        return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
     @classmethod
     def toolsets(cls, config):
@@ -404,6 +442,8 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
 
     async def setup(self, trace, runtime):
         bundle = required_bundle(self.config.tools)
+        if bundle.manifest["bundle_id"] != self.data.bundle_id:
+            raise vf.TaskError("Selected bundle differs from the task's content identity")
         if runtime.config.type not in ("docker", "prime") or not runtime.config.network_restricted:
             raise vf.TaskError("PhySim requires a Docker or Prime runtime with framework-only network access")
         state = trace.state
@@ -413,8 +453,9 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
         (output / "observations").mkdir()
         state.output = str(output)
         await prepare_runtime(runtime)
-        self.runtime_access = RuntimeAccess(runtime, output, self.config.tools.predictor_limits)
-        state.runtime_access = await self.runtime_access.start()
+        access = RuntimeAccess(runtime, output, self.config.tools.predictor_limits)
+        self._runtime_access[trace.id] = access
+        state.runtime_access = await access.start()
         state.usage = dict(
             experiments=0,
             max_experiments=self.config.tools.max_experiments,
@@ -450,6 +491,7 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             E.dump(output / "laboratory_state.json", state.model_dump(exclude={"artifacts"}))
         trace.info["r6"] = dict(
             protocol=self.data.protocol,
+            world_name=self.data.world_name,
             artifact_directory=str(output),
             references=bundle.references(),
             verifiers_version=__import__("verifiers").__version__,
@@ -474,8 +516,9 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
         try:
             await self._finalize(trace, runtime)
         finally:
-            if hasattr(self, "runtime_access"):
-                await self.runtime_access.close()
+            access = self._runtime_access.pop(trace.id, None)
+            if access is not None:
+                await access.close()
             trace.state.runtime_access = {}
 
     async def _finalize(self, trace, runtime):
@@ -570,41 +613,75 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
 class R6Taskset(vf.Taskset[R6Task, R6Config]):
     DEFAULT_HARNESS = "bash"
 
+    def selections(self):
+        tools = self.config.task.tools
+        if self.config.bundles is not None:
+            return self.config.bundles
+        if tools.bundle is not None or tools.bundle_source is not None:
+            return [tools.bundle if tools.bundle is not None else tools.bundle_source]
+        from .hub import fetch_catalog
+
+        catalog = fetch_catalog(**self.config.catalog.model_dump())
+        rows = sorted(catalog["worlds"], key=lambda row: (row["world_name"], row["bundle_path"]))
+        sources = [
+            HubBundleConfig(**self.config.catalog.model_dump(), path=row["bundle_path"])
+            for row in rows
+            if row["status"] == "eval-ready"
+        ]
+        if not sources:
+            raise ValueError("The pinned catalog has no evaluation preparations")
+        return sources
+
     def load(self):
-        required_bundle(self.config.task.tools)
-        protocol = (
-            PROTOCOL
-            if self.config.task.coding_interface == "shell"
-            else f"r6-verifiers-v1-ipython-1-{PROMPT_CONDITION}"
-        )
-        n_ports = public_roster(self.config.task.tools).n_ports
-        protocol += "-k-" + precision_label(self.config.task.tools.reward_precision)
-        if n_ports != 12:
-            protocol += f"-ports-{n_ports}"
-        if self.config.prompt != DEFAULT_PROMPT:
-            protocol += "-prompt-" + hashlib.sha256(self.config.prompt.encode()).hexdigest()[:12]
-        system_prompt = public_prompt(self.config.task.tools, self.config.task.coding_interface)
-        if self.config.task.checkpoint_artifact is not None:
-            protocol += (
-                "-checkpoint-"
-                + hashlib.sha256(str(self.config.task.checkpoint_artifact.resolve()).encode()).hexdigest()[:12]
+        selections = self.selections()
+        if self.config.task.checkpoint_artifact is not None and len(selections) != 1:
+            raise ValueError("Checkpoint recovery requires selecting one preparation explicitly")
+        seen = set()
+        for index, selection in enumerate(selections):
+            config = self.config.task.model_copy(deep=True)
+            config.tools.bundle = selection.expanduser().resolve() if isinstance(selection, Path) else None
+            config.tools.bundle_source = (
+                selection.model_copy(deep=True) if isinstance(selection, HubBundleConfig) else None
             )
-            system_prompt += recovery_prompt()
-        yield R6Task(
-            R6Data(
-                idx=0,
-                name="r6-prepared-laboratory",
-                protocol=protocol,
-                prompt=self.config.prompt,
-                system_prompt=system_prompt,
-                image=self.config.task.agent_image,
-                workdir="/workspace",
-                network_allow=[],
-                resources=vf.TaskResources(cpu=4, memory=8),
-                timeout=vf.TaskTimeout(setup=self.config.task.setup_timeout, agent=86400, finalize=900, scoring=7200),
-            ),
-            self.config.task,
-        )
+            bundle = required_bundle(config.tools)
+            identity = bundle.manifest["bundle_id"]
+            if identity in seen:
+                raise ValueError("Duplicate evaluation preparation in taskset")
+            seen.add(identity)
+            protocol = (
+                PROTOCOL if config.coding_interface == "shell" else f"r6-verifiers-v1-ipython-1-{PROMPT_CONDITION}"
+            )
+            n_ports = public_roster(config.tools).n_ports
+            protocol += "-k-" + precision_label(config.tools.reward_precision)
+            if n_ports != 12:
+                protocol += f"-ports-{n_ports}"
+            if self.config.prompt != DEFAULT_PROMPT:
+                protocol += "-prompt-" + hashlib.sha256(self.config.prompt.encode()).hexdigest()[:12]
+            system_prompt = public_prompt(config.tools, config.coding_interface)
+            if config.checkpoint_artifact is not None:
+                protocol += (
+                    "-checkpoint-" + hashlib.sha256(str(config.checkpoint_artifact.resolve()).encode()).hexdigest()[:12]
+                )
+                system_prompt += recovery_prompt()
+            yield R6Task(
+                R6Data(
+                    idx=index,
+                    bundle=config.tools.bundle,
+                    bundle_source=config.tools.bundle_source,
+                    bundle_id=bundle.manifest["bundle_id"],
+                    world_name=bundle.manifest["objects"]["world"]["name"],
+                    name="r6-prepared-laboratory",
+                    protocol=protocol,
+                    prompt=self.config.prompt,
+                    system_prompt=system_prompt,
+                    image=config.agent_image,
+                    workdir="/workspace",
+                    network_allow=[],
+                    resources=vf.TaskResources(cpu=4, memory=8),
+                    timeout=vf.TaskTimeout(setup=config.setup_timeout, agent=86400, finalize=900, scoring=7200),
+                ),
+                config,
+            )
 
 
 if __name__ == "__main__":

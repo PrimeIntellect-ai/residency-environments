@@ -1,6 +1,5 @@
-# BF centered-pulse-v2 is the pinned default. Select a local bundle to override it.
+# Evaluate all preparations in the pinned catalog; -r repeats each world equally.
 model = "YOUR_MODEL_ID"
-num_tasks = 1
 num_rollouts = 1
 max_concurrent = 1
 push = false
@@ -13,7 +12,7 @@ output_root = "outputs/r6/artifacts"
 agent_image = "python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93"
 
 [env.taskset.task.tools]
-# bundle = "/path/to/bundle" # Optional override of the BF default.
+# bundle = "/path/to/bundle" # Optional single-preparation override.
 max_experiments = 1000
 max_total_tu = 50000
 max_validation_attempts = 128

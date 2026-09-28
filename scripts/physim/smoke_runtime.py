@@ -8,11 +8,12 @@ import json
 import os
 import subprocess
 import threading
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from physim.runtime_sandbox import PUBLIC_IMAGE
-from physim.taskset import R6ToolsConfig, required_bundle
+from physim.taskset import R6Config, R6Taskset, required_bundle
 
 PREDICTOR = """from pathlib import Path
 import json
@@ -52,7 +53,6 @@ assert all(checks.values())
 def main(args):
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
-    bundle = required_bundle(R6ToolsConfig(bundle=args.bundle))
     steps = [
         ("bash", {"command": "python - <<'PY'\n" + BOUNDARY_PROBE + "PY\n"}),
         (
@@ -124,12 +124,11 @@ def main(args):
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    runtime = dict(type=args.runtime, image=PUBLIC_IMAGE, allow=[], workdir="/workspace", cpu=2, memory=4)
+    runtime = dict(type=args.runtime, image=args.image, allow=[], workdir="/workspace", cpu=2, memory=4)
     config = dict(
         model="offline/scripted",
-        num_tasks=1,
         num_rollouts=args.rollouts,
-        max_concurrent=1,
+        max_concurrent=args.max_concurrent,
         push=False,
         output_dir=str(root / "runs"),
         client=dict(
@@ -139,13 +138,17 @@ def main(args):
             taskset=dict(
                 id="physim",
                 task=dict(
-                    output_root=str(root / "artifacts"), tools=dict(bundle=str(bundle.root), predictor_runtime=runtime)
+                    output_root=str(root / "artifacts"),
+                    agent_image=args.image,
+                    tools=dict(bundle=str(args.bundle.resolve()) if args.bundle else None, predictor_runtime=runtime),
                 ),
             ),
             agent=dict(harness=dict(id="bash", edit=True, search=False), runtime=runtime, max_turns=8),
             retries=dict(max_retries=0),
         ),
     )
+    tasks = list(R6Taskset(R6Config.model_validate(config["env"]["taskset"])))
+    bundles = {task.data.bundle_id: required_bundle(task.config.tools) for task in tasks}
     (root / "eval.json").write_text(json.dumps(config, indent=2) + "\n")
     try:
         with (root / "eval.log").open("w") as log:
@@ -164,16 +167,26 @@ def main(args):
     episodes = [
         json.loads(line) for path in (root / "runs").rglob("traces.jsonl") for line in path.read_text().splitlines()
     ]
-    assert len(episodes) == args.rollouts, len(episodes)
-    expected = json.loads(bundle.verified_path("checks.json").read_text())["reference"]["primary_joint_energy"]
+    assert len(episodes) == len(tasks) * args.rollouts, len(episodes)
+    counts = Counter()
     energies = []
     for episode in episodes:
         trace = episode["traces"][-1]
         assert trace["ok"], trace.get("errors")
         info = trace["info"]["r6"]
+        bundle = bundles[info["references"]["bundle"]]
+        assert info["references"] == bundle.references()
+        assert info["world_name"] == bundle.manifest["objects"]["world"]["name"]
+        counts[info["references"]["bundle"]] += 1
+        expected = json.loads(bundle.verified_path("checks.json").read_text())["reference"]["primary_joint_energy"]
         assert info["grade"]["status"] == "COMPLETE", info
         assert abs(info["primary_joint_energy"] - expected) < 1e-10, info["primary_joint_energy"]
         energies.append(info["primary_joint_energy"])
+    assert counts == {identifier: args.rollouts for identifier in bundles}, counts
+    for request in calls:
+        messages = json.dumps(request["messages"])
+        assert not any(identifier in messages for identifier in bundles)
+        assert "bundles/" not in messages
     audits = [
         m.get("content", "")
         for request in calls
@@ -184,11 +197,14 @@ def main(args):
     report = dict(
         ok=True,
         runtime=args.runtime,
-        rollouts=args.rollouts,
+        tasks=len(tasks),
+        rollouts=len(episodes),
+        rollouts_per_task=args.rollouts,
         model_calls=len(calls),
         inference_cost_usd=0,
         energies=energies,
-        references=bundle.references(),
+        references={identifier: bundle.references() for identifier, bundle in bundles.items()},
+        counts=dict(counts),
     )
     (root / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
@@ -199,5 +215,9 @@ if __name__ == "__main__":
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--runtime", choices=["docker", "prime"], default="docker")
+    parser.add_argument(
+        "--image", default=PUBLIC_IMAGE, help="optional image with the pinned public packages preinstalled"
+    )
+    parser.add_argument("--max-concurrent", type=int, default=1)
     parser.add_argument("--rollouts", type=int, default=2)
     main(parser.parse_args())

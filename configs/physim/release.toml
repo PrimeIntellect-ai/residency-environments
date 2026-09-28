@@ -4,9 +4,9 @@ data_license = "CC-BY-4.0"
 dataset_repo = "seanpohorence/physim-worlds"
 exposure = "public-reference-development"
 
-dataset_revision = "552229e61813b5684be2051349d778acea054922"
-release_id = "dataset-release:sha256:d5945db2389c71401a7c264a770cf9b6b07300c2f2d1e08430863a5444a00b96"
-published_date = "2026-09-27"
+dataset_revision = "bd77a0da2f14eef352bd80c4a38dff426e5c1bed"
+release_id = "dataset-release:sha256:b6f6b78246b780b20e154e7ef4c7a7a5028b8733cc148a8908e2d934dd69510c"
+published_date = "2026-09-28"
 
 [code_packages]
 physim = "git+https://github.com/swpo/residency-environments.git@49ed83a54a453ec9c875d7d4fde1b8bcb5f13e03#subdirectory=environments/physim"

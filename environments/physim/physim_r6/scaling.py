@@ -36,7 +36,7 @@ class ScalingTaskConfig(T.R6TaskConfig):
     spend: SpendConfig
 
 
-class ScalingConfig(vf.TasksetConfig):
+class ScalingConfig(T.R6Config):
     task: ScalingTaskConfig
     prompt: str = T.DEFAULT_PROMPT
 
@@ -114,7 +114,7 @@ class R6ScalingTaskset(vf.Taskset[ScalingTask, ScalingConfig]):
     DEFAULT_HARNESS = "bash"
 
     def load(self):
-        original = T.R6Taskset(T.R6Config(id="physim_r6", task=self.config.task, prompt=self.config.prompt))
+        original = T.R6Taskset(self.config)
         for task in original.load():
             suffix = "-spend-accounting-v1" if self.config.task.spend.limit_usd is None else "-dollar-budget-v1"
             data = task.data.model_copy(update={"protocol": task.data.protocol + suffix})

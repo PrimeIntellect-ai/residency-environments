@@ -33,7 +33,7 @@ include = ["physim", "physim_r6", "physim_r6_scaling", "pyproject.toml", "README
 exclude = ["physim/blobdata"]
 
 [tool.verifiers.eval]
-num_examples = 1
+num_examples = 3
 rollouts_per_example = 1
 
 [tool.ruff]

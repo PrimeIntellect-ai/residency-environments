@@ -20,10 +20,23 @@ The package pins its Blobkit release, current Verifiers commit, NumPy, and SciPy
 Hugging Face support is included. No local Blobkit checkout or separately selected
 extras are needed. The PyPI project named `physim` is unrelated.
 
-The default task is **BF, centered-pulse-v2**, pinned to HF commit
-`552229e61813b5684be2051349d778acea054922`. It runs one preparation, never a scan
-of the registry. `bf_trail_lab.toml`, `xv_rotor_lab.toml`, and `p4g2_044.toml`
-select the three current preparations. A local bundle overrides the BF default:
+The default taskset contains **BF, p4g2_044, and XV**, one task per evaluation
+preparation in the catalog at pinned HF commit
+`bd77a0da2f14eef352bd80c4a38dff426e5c1bed`. Superseded preparations are absent
+from this snapshot. Each task is a complete investigation and submission, graded
+on that preparation's retained suite. `-n` limits the number of tasks; `-r`
+repeats each selected task. For example, `-r 3` runs nine investigations, three
+per world. Requesting `-n 50` does not expand this finite three-task set.
+
+The full-eval convention is three tasks with one rollout each. Results retain
+`task.data.world_name`, `task.data.bundle_id`, a stable `task.key`, and complete
+world/preparation/suite references in `trace.info.r6.references`. Prompts and
+apparatus interfaces are rendered separately for each task. These identities
+are evaluator metadata, not model-facing descriptions. Equal repetitions give
+each world equal weight in the mean reward; report per-world rewards alongside it.
+
+`bf_trail_lab.toml`, `xv_rotor_lab.toml`, and `p4g2_044.toml` select individual
+preparations. A local bundle also selects exactly one task:
 
 ```sh
 uv run --no-sync vf-eval physim --model YOUR_MODEL_ID \
@@ -34,6 +47,22 @@ Alternatively set `env.taskset.task.tools.bundle_source` with `repo`, a full
 40-character `revision`, and `path`. Supplying both a local bundle and a remote
 source is an error. Every download is hash-verified; `bundle_source.offline=true`
 requires a populated cache. See [DATA_SOURCES.md](DATA_SOURCES.md).
+
+For a subset, set `env.taskset.bundles` to a nonempty list of local paths or
+remote `{repo, revision, path}` records. Do not combine this list with the
+single-bundle options. Duplicate bundle identities are rejected. For example:
+
+```toml
+[env.taskset]
+id = "physim"
+bundles = ["/absolute/path/to/bf-bundle", "/absolute/path/to/xv-bundle"]
+```
+
+`env.taskset.catalog` accepts `repo`, `revision`, `cache`, and `offline` to
+select another pinned catalog or reuse its verified cache. Publishing new data
+does not change an existing run: adopting a new catalog requires changing the
+full commit pin. Local paths must exist on each trusted worker; remote sources
+are resolved on that worker. Checkpoint recovery requires a single preparation.
 
 ## Runtime and grading boundary
 
@@ -122,8 +151,9 @@ uv run --no-sync python scripts/physim/smoke_runtime.py \
   --runtime prime --output outputs/physim-prime-smoke
 ```
 
-The script runs two independent rollouts by default. Each output directory must
-be new. A live model wiring check can use `-n 1 -r 2 --env.agent.max-turns 4`;
+The script runs two independent rollouts per world by default (six total).
+Pass `--bundle /absolute/path/to/bundle` for a single-world check. Each output
+directory must be new. A live model wiring check can use `-n 1 -r 2 --env.agent.max-turns 4`;
 that short check is not a capability evaluation.
 
 ## Code organization and data contributions

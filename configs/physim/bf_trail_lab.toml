@@ -48,5 +48,5 @@ max_retries = 0
 
 [env.taskset.task.tools.bundle_source]
 repo = "seanpohorence/physim-worlds"
-revision = "552229e61813b5684be2051349d778acea054922"
+revision = "bd77a0da2f14eef352bd80c4a38dff426e5c1bed"
 path = "bundles/bf_trail_lab_centered_v2/38d159a8052bb0fc24d0d8feefe3985ac645fb19954f2c84aa54954a948b561e"
