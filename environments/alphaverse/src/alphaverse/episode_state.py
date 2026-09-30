@@ -25,6 +25,8 @@ from alphaverse.time_accounting import (
 if TYPE_CHECKING:
     from verifiers.v1.runtimes import RuntimeConfig
 
+    from alphaverse.strategy.runtime import TradingRuntimeTimeouts
+
 
 class EpisodeFinalized(RuntimeError):
     """A mutating operation was requested after terminal finalization."""
@@ -133,6 +135,7 @@ class EpisodeState:
         wall_quantum_ns: int = 1_000_000,
         session_duration_ns: int | None = None,
         strategy_runtime: RuntimeConfig | None = None,
+        strategy_timeouts: TradingRuntimeTimeouts | None = None,
     ) -> None:
         if not episode_id:
             raise ValueError("episode_id must not be empty")
@@ -153,7 +156,10 @@ class EpisodeState:
         if max_market_time is not None and max_market_time < owned_episode.now:
             raise ValueError("max_market_time precedes the episode start")
         self._strategy_runtime = strategy_runtime
-        session = PlayerSession(owned_episode, focal_spec, strategy_runtime=strategy_runtime)
+        self._strategy_timeouts = strategy_timeouts
+        session = PlayerSession(
+            owned_episode, focal_spec, strategy_runtime=strategy_runtime, strategy_timeouts=strategy_timeouts
+        )
         time_controller = EpisodeTimeController(
             session,
             mode=time_mode,
@@ -197,7 +203,12 @@ class EpisodeState:
                 raise EpisodeFinalized(f"episode is finalized: {record.episode_id}")
             if spec.participant_id in record.sessions:
                 raise ValueError(f"participant already exists: {spec.participant_id}")
-            session = PlayerSession(record.session.episode, spec, strategy_runtime=self._strategy_runtime)
+            session = PlayerSession(
+                record.session.episode,
+                spec,
+                strategy_runtime=self._strategy_runtime,
+                strategy_timeouts=self._strategy_timeouts,
+            )
             record.sessions[spec.participant_id] = session
             if baseline_source is not None:
                 # Seed and later uploads execute in the same isolated runtime type.

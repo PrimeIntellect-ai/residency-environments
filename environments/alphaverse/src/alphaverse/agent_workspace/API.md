@@ -279,12 +279,13 @@ Stops automation and cancels its live orders without flattening the account.
 Provide exactly one time argument. All deployed strategies and participants run
 during the interval. The call is synchronous. By default it returns at the next
 bounded simulation checkpoint after a strategy-authored alert. Its response
-contains `market_time`, the original `requested_until`, `woke_on_alert`, and the
+contains `market_time`, the `requested_until` target, `woke_on_alert`, and the
 alerts that caused the wake. Returned alerts are acknowledged, so a later wait
 does not wake for the same alert. Set `wake_on_alert=false` to run through
-alerts. For long episodes, use checkpoint intervals no larger than one market
-hour so the request completes within the tool timeout and unsafe behavior can
-be stopped.
+alerts. Independently of alerts, long calls yield at a completed-event boundary
+with `yielded_for_budget=true`. No events are dropped and virtual time is not
+skipped. To finish that wait, call `wait(until_ns=requested_until)` again; repeating
+the original duration would instead move the target farther into the future.
 
 Scheduled episodes clamp waits exactly at the next session boundary. The response
 then reports `market_session.state="intermission"`; additional waits cannot advance

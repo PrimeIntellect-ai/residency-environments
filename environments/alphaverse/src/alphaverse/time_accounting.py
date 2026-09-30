@@ -245,8 +245,8 @@ class EpisodeTimeController:
         # A zero-duration wait is still meaningful: it drains actions and feed
         # deliveries already scheduled at the current virtual timestamp.
         self.session.wait(until=target)
-        if target != before:
-            self._advances.append(TimeAdvance(reason, before, target, idempotency_key))
+        if self.session.now != before:
+            self._advances.append(TimeAdvance(reason, before, self.session.now, idempotency_key))
         return self.session.now
 
 

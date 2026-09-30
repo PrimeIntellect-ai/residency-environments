@@ -3,6 +3,8 @@
 The exchange runs inside a non-colocated, task-scoped Toolset runtime.
 """
 
+import asyncio
+import functools
 import json
 import secrets
 from contextlib import contextmanager
@@ -15,9 +17,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from alphaverse.artifact_egress import FRAMEWORK_ROUTE
 from alphaverse.capture import market_capture_spec as build_market_capture_spec
 from alphaverse.episode_runtime import EpisodeRuntime, EpisodeRuntimeConfig
+from alphaverse.execution_limits import ToolDeadlineExceeded, rpc_budget, synchronous_deadline
 from alphaverse.prop_trader import PROP_PARTICIPANT_ID, competitive_prop_source
 from alphaverse.strategy.errors import StrategyInfrastructureError
-from alphaverse.strategy.runtime import validate_trading_runtime
+from alphaverse.strategy.runtime import TradingRuntimeTimeouts, validate_trading_runtime
 from alphaverse.workspace import install_task_workspace
 from alphaverse.world import LatentDemandProfile
 
@@ -89,6 +92,7 @@ class AlphaverseData(vf.TaskData):
     participant_id: str = "player"
     starting_cash: int = Field(default=1_000_000, gt=0)
     max_market_time_ns: int | None = Field(default=None, gt=0)
+    model_turn_cap: int | None = Field(default=None, gt=0)
     join_episode_id: str | None = None
     prop_seed_profile: Literal["passive", "competitive"] = "passive"
     prop_framing: Literal["incumbent", "neutral", "arbitrary"] = "incumbent"
@@ -122,6 +126,11 @@ class AlphaverseState(vf.State):
     prop_access_token: str | None = None
     toolset_url: str | None = None
     infrastructure_error: str | None = None
+    trading_cleanup_attempted: bool = False
+    limit_reached: str | None = None
+    tool_timeout_seconds: float = 120.0
+    cleanup_timeout_seconds: float = 20.0
+    artifact_export_timeout_seconds: float = 120.0
 
 
 class AlphaverseToolsetConfig(vf.ToolsetConfig):
@@ -151,10 +160,17 @@ class AlphaverseToolsetConfig(vf.ToolsetConfig):
     prop_control_scope: Literal["full_source", "knobs"] = "full_source"
     opponent_roster_id: str | None = None
     session_duration_ns: int | None = Field(default=None, gt=0)
+    tool_timeout_seconds: float = Field(default=120.0, gt=0, allow_inf_nan=False)
+    wait_slice_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    cleanup_timeout_seconds: float = Field(default=20.0, gt=0, allow_inf_nan=False)
+    artifact_export_timeout_seconds: float = Field(default=120.0, gt=0, allow_inf_nan=False)
+    strategy_timeouts: TradingRuntimeTimeouts = Field(default_factory=TradingRuntimeTimeouts)
 
     @model_validator(mode="after")
     def require_isolated_trading_runtime(self) -> "AlphaverseToolsetConfig":
         validate_trading_runtime(self.strategy_runtime)
+        if self.wait_slice_seconds >= self.tool_timeout_seconds:
+            raise ValueError("wait_slice_seconds must be smaller than tool_timeout_seconds")
         return self
 
 
@@ -251,9 +267,35 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         self._task_data: AlphaverseData | None = None
         self._runtime: EpisodeRuntime | None = None
         self._role_event_cursors: dict[str, int] = {}
+        self._call_lock = asyncio.Lock()
+        self._fatal_error: str | None = None
 
     async def setup_task(self, task: AlphaverseData) -> None:
         self._task_data = task
+
+    def _bounded_call(self, fn):
+        @functools.wraps(fn)
+        async def persist_errors(*args, **kwargs):
+            before = self._state_adapter.dump_json(self.state)
+            try:
+                return await fn(*args, **kwargs)
+            except Exception:
+                # Verifiers' default state wrapper pushes only successful calls.
+                await self._push_state(before)
+                raise
+
+        synced = self._with_state(persist_errors)
+
+        @functools.wraps(fn)
+        async def bounded(*args, **kwargs):
+            with rpc_budget(self.config.tool_timeout_seconds):
+                # Leave a bounded unwind window to close a failed deployment and
+                # publish its error before the request's outer deadline expires.
+                timeout = self.config.tool_timeout_seconds + self.config.cleanup_timeout_seconds + 5
+                async with asyncio.timeout(timeout), self._call_lock:
+                    return await synced(*args, **kwargs)
+
+        return bounded
 
     @staticmethod
     def _register_tools(mcp, toolset: "AlphaverseToolset", allowed: set[str]) -> None:
@@ -263,7 +305,7 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
             if fn.__name__ not in allowed:
                 continue
             mcp.add_tool(
-                toolset._with_state(fn),
+                toolset._bounded_call(fn),
                 name=getattr(fn, "tool_name", None) or fn.__name__,
                 description=(fn.__doc__ or "").strip() or None,
             )
@@ -274,7 +316,7 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         from starlette.responses import JSONResponse
 
         self._register_tools(mcp, self, self._PUBLIC_TOOLS)
-        framework_call = self._with_state(self._framework_request)
+        framework_call = self._bounded_call(self._framework_request)
 
         @mcp.custom_route(
             FRAMEWORK_ROUTE,
@@ -282,7 +324,8 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
             include_in_schema=False,
         )
         async def framework_route(request):
-            payload = await request.json()
+            async with asyncio.timeout(self.config.tool_timeout_seconds):
+                payload = await request.json()
             if not isinstance(payload, dict):
                 raise TypeError("framework payload must be an object")
             capability = payload.get("capability")
@@ -322,10 +365,20 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
                 artifact_transport=self.config.artifact_transport,
                 artifact_export_chunk_bytes=(self.config.artifact_export_chunk_bytes),
                 strategy_runtime=self.config.strategy_runtime,
+                strategy_timeouts=self.config.strategy_timeouts,
+                wait_slice_seconds=self.config.wait_slice_seconds,
             )
         )
-        self._exit_stack.callback(self._runtime.close)
+        self._exit_stack.callback(self._close_runtime)
         return self._runtime
+
+    def _close_runtime(self) -> None:
+        if self._runtime is not None:
+            try:
+                with synchronous_deadline(self.config.cleanup_timeout_seconds):
+                    self._runtime.close()
+            except ToolDeadlineExceeded as exc:
+                raise StrategyInfrastructureError("trading-runtime cleanup exceeded its server deadline") from exc
 
     def _episode_id(self) -> str:
         episode_id = self.state.episode_id
@@ -367,21 +420,33 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
 
     @contextmanager
     def _market_operation(self):
-        if self.state.infrastructure_error:
+        if self._fatal_error or self.state.infrastructure_error:
+            self.state.infrastructure_error = self._fatal_error or self.state.infrastructure_error
             raise StrategyInfrastructureError(self.state.infrastructure_error)
         try:
-            yield self._embedded()
+            with synchronous_deadline(self.config.tool_timeout_seconds):
+                try:
+                    yield self._embedded()
+                except StrategyInfrastructureError:
+                    raise
+                except Exception:
+                    self._sync_terminal()
+                    raise
+                else:
+                    self._sync_terminal()
+        except ToolDeadlineExceeded as exc:
+            self._fatal_error = "server-side tool deadline exceeded; market state is not safe to resume"
+            self.state.infrastructure_error = self._fatal_error
+            raise StrategyInfrastructureError(self._fatal_error) from exc
         except StrategyInfrastructureError as exc:
+            self._fatal_error = str(exc)
             self.state.infrastructure_error = str(exc)
             raise
-        finally:
-            terminal = None
-            if self._runtime is not None and not self.state.infrastructure_error:
-                terminal = self._runtime.sync_terminal()
+
+    def _sync_terminal(self) -> None:
+        if self._runtime is not None:
+            terminal = self._runtime.sync_terminal()
             if terminal is not None:
-                # A domain operation may discover that the horizon finalized
-                # the episode and then raise. Synchronize terminal state even
-                # on that error path so the harness can export before teardown.
                 self.state.terminal_summary = terminal
                 self.state.terminated = True
 
@@ -580,8 +645,7 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
                 with self._market_operation() as runtime:
                     return runtime.terminate()
             if operation == "release_trading_runtimes":
-                if self._runtime is not None:
-                    self._runtime.close()
+                self._close_runtime()
                 return {"released": True}
             if operation != "artifact_chunk" or not self.state.terminated:
                 raise PermissionError("invalid framework request")
@@ -643,7 +707,7 @@ class AlphaverseToolset(vf.Toolset[AlphaverseToolsetConfig, AlphaverseState]):
         until_ns: int | None = None,
         wake_on_alert: bool = True,
     ) -> dict[str, Any]:
-        """Advance market time, returning early for a strategy-authored alert by default."""
+        """Advance market time; return early for alerts or a resumable wall-time slice."""
 
         return await self._call(
             "POST",
@@ -730,6 +794,11 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
 
     NEEDS_CONTAINER = True
 
+    def _configure_deadlines(self, trace: vf.Trace) -> None:
+        trace.state.tool_timeout_seconds = self.config.toolset.tool_timeout_seconds
+        trace.state.cleanup_timeout_seconds = self.config.toolset.cleanup_timeout_seconds
+        trace.state.artifact_export_timeout_seconds = self.config.toolset.artifact_export_timeout_seconds
+
     @classmethod
     def toolsets(cls, config: AlphaverseTaskConfig) -> list[vf.Toolset]:
         """Launch one evaluator-owned market Toolset for each rollout."""
@@ -752,6 +821,7 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
         return [AlphaverseToolset(toolset)]
 
     async def setup(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
+        self._configure_deadlines(trace)
         if self.data.join_episode_id is not None:
             raise RuntimeError("the episode owner cannot join an existing task-scoped Toolset")
         await install_task_workspace(self.data, runtime)
@@ -768,6 +838,17 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
         summary = trace.state.terminal_summary
         if isinstance(summary, dict):
             trace.state.terminated = True
+            framework_limits = {"max_turns", "max_input_tokens", "max_output_tokens", "max_total_tokens"}
+            if trace.stop_condition in framework_limits:
+                trace.state.limit_reached = trace.stop_condition
+            if (
+                trace.state.limit_reached is None
+                and self.data.max_market_time_ns is not None
+                and summary["market_time"] >= self.data.max_market_time_ns
+            ):
+                trace.state.limit_reached = "market_time"
+            summary["limit_reached"] = trace.state.limit_reached
+            summary["outcome"] = "limit_reached" if trace.state.limit_reached else "completed"
             trace.info["alphaverse"] = summary
             egress_directory = trace.state.artifact_egress_directory
             bundle = summary.get("artifact_bundle")
@@ -798,6 +879,13 @@ class AlphaverseTask(vf.Task[AlphaverseData, AlphaverseState, AlphaverseTaskConf
         if trace.state.infrastructure_error:
             return True
         return isinstance(trace.state.terminal_summary, dict)
+
+    @vf.stop
+    async def model_turn_limit(self, trace: vf.Trace) -> bool:
+        if self.data.model_turn_cap is not None and trace.num_turns >= self.data.model_turn_cap:
+            trace.state.limit_reached = "model_turn_cap"
+            return True
+        return False
 
     @staticmethod
     def _number(summary: dict[str, Any], key: str) -> float:
@@ -906,6 +994,7 @@ class AlphaversePropTask(AlphaverseTask):
         return [AlphaversePropToolset(config.toolset)]
 
     async def setup(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
+        self._configure_deadlines(trace)
         if self.config.toolset.url:
             if not self.data.join_episode_id:
                 raise RuntimeError("prop role requires a joined episode id")
@@ -947,6 +1036,7 @@ class AlphaverseTaskset(vf.Taskset[AlphaverseTask, AlphaverseTasksetConfig]):
                     participant_id=config.participant_id,
                     starting_cash=config.starting_cash,
                     max_market_time_ns=config.max_market_time_ns,
+                    model_turn_cap=config.model_turn_cap,
                 ),
                 config.task,
             )

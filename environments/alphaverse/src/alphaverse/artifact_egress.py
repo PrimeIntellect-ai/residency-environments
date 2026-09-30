@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import shutil
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,7 @@ def _host_url(url: str) -> str:
     return urlunsplit(parts._replace(netloc=f"127.0.0.1{port}"))
 
 
-def _request_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _request_json(url: str, payload: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:
     request = urllib.request.Request(
         _host_url(url),
         data=json.dumps(payload).encode("utf-8"),
@@ -36,7 +37,7 @@ def _request_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
             "Accept": "application/json, text/event-stream",
         },
     )
-    with urllib.request.urlopen(request, timeout=300) as response:
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
         decoded = json.loads(response.read())
     if not isinstance(decoded, dict):
         raise RuntimeError("artifact MCP response is not a JSON object")
@@ -46,19 +47,23 @@ def _request_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     return decoded
 
 
-async def call_mcp_tool(url: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+async def call_mcp_tool(
+    url: str, name: str, arguments: dict[str, Any], *, timeout_seconds: float = 30.0
+) -> dict[str, Any]:
     """Call one MCP tool directly from trusted evaluator-side orchestration."""
 
-    response = await asyncio.to_thread(
-        _request_json,
-        url,
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-    )
+    async with asyncio.timeout(timeout_seconds):
+        response = await asyncio.to_thread(
+            _request_json,
+            url,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            },
+            timeout_seconds,
+        )
     result = response.get("result")
     if not isinstance(result, dict):
         raise RuntimeError("artifact MCP response has no result")
@@ -77,19 +82,23 @@ async def call_framework(
     mcp_url: str,
     capability: str,
     request: dict[str, Any],
+    *,
+    timeout_seconds: float = 30.0,
 ) -> dict[str, Any]:
     """Call the evaluator-only route without advertising an MCP tool."""
 
     parts = urlsplit(_host_url(mcp_url))
     url = urlunsplit(parts._replace(path=FRAMEWORK_ROUTE))
-    return await asyncio.to_thread(
-        _request_json,
-        url,
-        {
-            "capability": capability,
-            "request": json.dumps(request, separators=(",", ":")),
-        },
-    )
+    async with asyncio.timeout(timeout_seconds):
+        return await asyncio.to_thread(
+            _request_json,
+            url,
+            {
+                "capability": capability,
+                "request": json.dumps(request, separators=(",", ":")),
+            },
+            timeout_seconds,
+        )
 
 
 async def release_trading_runtimes(trace: Any, mcp_urls: dict[str, str]) -> None:
@@ -98,11 +107,19 @@ async def release_trading_runtimes(trace: Any, mcp_urls: dict[str, str]) -> None
     token = getattr(state, "artifact_export_token", None)
     if not token:
         return  # Joined participant traces do not own the shared market.
+    if state.trading_cleanup_attempted:
+        return
+    state.trading_cleanup_attempted = True
     try:
         url = mcp_urls.get("alphaverse")
         if not url:
             raise RuntimeError("Alphaverse Toolset URL is unavailable for cleanup")
-        await call_framework(url, token, {"operation": "release_trading_runtimes"})
+        await call_framework(
+            url,
+            token,
+            {"operation": "release_trading_runtimes"},
+            timeout_seconds=trace.state.cleanup_timeout_seconds + 5,
+        )
     except Exception as exc:
         state.infrastructure_error = f"trading-runtime cleanup failed: {type(exc).__name__}"
         raise
@@ -118,7 +135,12 @@ async def finalize_episode(trace: Any, mcp_urls: dict[str, str]) -> None:
         url = mcp_urls.get("alphaverse")
         if not token or not url:
             raise RuntimeError("Alphaverse episode finalization capability is unavailable")
-        await call_framework(url, token, {"operation": "finalize_episode"})
+        await call_framework(
+            url,
+            token,
+            {"operation": "finalize_episode"},
+            timeout_seconds=trace.state.tool_timeout_seconds + trace.state.cleanup_timeout_seconds + 5,
+        )
     await export_terminal_artifacts(trace, mcp_urls)
 
 
@@ -129,6 +151,15 @@ async def export_terminal_artifacts(
     root: str | Path | None = None,
 ) -> Path | None:
     """Stream an immutable episode bundle after the agent has left the market."""
+
+    timeout = trace.state.artifact_export_timeout_seconds
+    async with asyncio.timeout(timeout):
+        return await _export_terminal_artifacts(trace, mcp_urls, root=root, deadline=time.monotonic() + timeout)
+
+
+async def _export_terminal_artifacts(
+    trace: Any, mcp_urls: dict[str, str], *, root: str | Path | None, deadline: float
+) -> Path | None:
 
     if getattr(trace.state, "artifact_egress_complete", False):
         existing = getattr(trace.state, "artifact_egress_directory", None)
@@ -195,6 +226,7 @@ async def export_terminal_artifacts(
                             "offset": offset,
                             "max_bytes": chunk_bytes,
                         },
+                        timeout_seconds=max(0.001, deadline - time.monotonic()),
                     )
                     encoded = chunk.get("data")
                     if not isinstance(encoded, str):
@@ -218,11 +250,11 @@ async def export_terminal_artifacts(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        EpisodeReplay(incoming, verify=True)
+        await asyncio.to_thread(EpisodeReplay, incoming, verify=True)
         if destination.exists():
             shutil.rmtree(destination)
         incoming.replace(destination)
-    except Exception:
+    except BaseException:
         shutil.rmtree(incoming, ignore_errors=True)
         raise
     trace.state.artifact_egress_directory = str(destination)

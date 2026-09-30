@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from verifiers.v1.harness import HarnessSession
 from verifiers.v1.types import Messages
 
@@ -14,14 +16,19 @@ class ArtifactExportSession:
     def __init__(self, inner: HarnessSession, mcp_urls: dict[str, str]) -> None:
         self.inner = inner
         self.mcp_urls = dict(mcp_urls)
+        self._closed = False
 
     async def turn(self, messages: Messages | None = None) -> None:
         await self.inner.turn(messages)
         await export_terminal_artifacts(self.inner.trace, self.mcp_urls)
 
     async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         try:
-            await self.inner.close()
+            async with asyncio.timeout(self.inner.trace.state.cleanup_timeout_seconds):
+                await self.inner.close()
             await export_terminal_artifacts(self.inner.trace, self.mcp_urls)
         finally:
             await release_trading_runtimes(self.inner.trace, self.mcp_urls)

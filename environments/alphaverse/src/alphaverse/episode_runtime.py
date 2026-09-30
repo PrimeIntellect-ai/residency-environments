@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from alphaverse.artifacts import EpisodeArtifactWriter, archive_bundle, load_manifest
 from alphaverse.capture import select_market_capture_events
 from alphaverse.episode_state import EpisodeMetrics, EpisodeState
+from alphaverse.execution_limits import simulation_slice
 from alphaverse.models import Side
 from alphaverse.opponent_roster import (
     legacy_prop_roster_id,
@@ -26,6 +27,8 @@ from alphaverse.world import LatentDemandProfile
 
 if TYPE_CHECKING:
     from verifiers.v1.runtimes import RuntimeConfig
+
+    from alphaverse.strategy.runtime import TradingRuntimeTimeouts
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +55,8 @@ class EpisodeRuntimeConfig:
     artifact_transport: Literal["auto", "inline", "stream"] = "auto"
     artifact_export_chunk_bytes: int = 4 * 1024 * 1024
     strategy_runtime: RuntimeConfig | None = None
+    strategy_timeouts: TradingRuntimeTimeouts | None = None
+    wait_slice_seconds: float = 10.0
 
 
 def event_record(cursor: int, event: Any) -> dict[str, object]:
@@ -77,6 +82,7 @@ def wait_response(session: PlayerSession, result: int | WaitResult) -> dict[str,
             "market_time": result,
             "requested_until": result,
             "woke_on_alert": False,
+            "yielded_for_budget": False,
             "alerts": [],
         }
     status = session.alert_status()
@@ -89,6 +95,7 @@ def wait_response(session: PlayerSession, result: int | WaitResult) -> dict[str,
         "market_time": result.market_time,
         "requested_until": result.target_market_time,
         "woke_on_alert": result.interrupted_by_alert,
+        "yielded_for_budget": result.interrupted_by_budget,
         "alerts": records,
         "next_alert_cursor": (int(records[-1]["cursor"]) if records else after_cursor),
     }
@@ -143,6 +150,7 @@ class EpisodeRuntime:
             wall_quantum_ns=config.wall_quantum_ns,
             session_duration_ns=config.session_duration_ns,
             strategy_runtime=config.strategy_runtime,
+            strategy_timeouts=config.strategy_timeouts,
         )
 
         roster_id = config.opponent_roster_id or legacy_prop_roster_id(
@@ -255,17 +263,18 @@ class EpisodeRuntime:
     ) -> dict[str, object]:
         if (duration_ns is None) == (until_ns is None):
             raise ValueError("provide exactly one of duration_ns or until_ns")
-        if duration_ns is not None:
-            result = self.state.run_for(
-                duration_ns,
-                interrupt_on_alert=wake_on_alert,
-            )
-        else:
-            assert until_ns is not None
-            result = self.state.run_until(
-                until_ns,
-                interrupt_on_alert=wake_on_alert,
-            )
+        with simulation_slice(self.config.wait_slice_seconds):
+            if duration_ns is not None:
+                result = self.state.run_for(
+                    duration_ns,
+                    interrupt_on_alert=wake_on_alert,
+                )
+            else:
+                assert until_ns is not None
+                result = self.state.run_until(
+                    until_ns,
+                    interrupt_on_alert=wake_on_alert,
+                )
         response = self._observe(lambda session: wait_response(session, result))
         market_session = asdict(self.state.market_session_info())
         market_session["state"] = market_session["state"].value

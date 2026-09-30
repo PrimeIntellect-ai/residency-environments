@@ -86,6 +86,63 @@ The single-player coordinator uses Verifiers' interaction lifecycle so closeout
 runs while the Toolset is still alive; coding harnesses must support sessions or
 resume (as the bundled adapters and stock Bash harness do).
 
+## Tool deadlines and optional episode limits
+
+Long waits return at completed-event boundaries after a bounded wall-clock
+slice. A response with `yielded_for_budget=true` has not reached its requested
+target: continue with `wait(until_ns=response["requested_until"])`. No events are
+dropped and no market time is skipped. This avoids holding one RPC open for an
+entire simulated session, particularly with remote trading runtimes.
+
+Settings under `[env.taskset.task.toolset]`:
+
+| Setting | Default | Scope |
+| --- | ---: | --- |
+| `wait_slice_seconds` | 10 | Cooperative wait slice; yields after a complete event |
+| `tool_timeout_seconds` | 120 | Hard deadline for synchronous server work |
+| `cleanup_timeout_seconds` | 20 | Trading-runtime and harness cleanup budget |
+| `artifact_export_timeout_seconds` | 120 | Total artifact-export budget |
+| `strategy_timeouts.startup_seconds` | 60 | Provisioning a trading runtime |
+| `strategy_timeouts.cleanup_seconds` | 10 | Releasing one trading runtime |
+
+The Toolset uses a POSIX main-thread timer because an asyncio timeout alone
+cannot interrupt blocking simulation or provider-bridge calls. An outer request
+deadline adds the cleanup budget and five seconds for state/error publication.
+Configure `env.agent.harness.tool_timeout` above that total; the single-player
+config rejects a smaller client deadline. A hard interruption invalidates market
+state and returns a tool error, while ordinary wait slices remain resumable.
+Cleanup is bounded and attempted once per trace, with failures recorded rather
+than repeatedly blocking teardown.
+
+The default single-player agent explicitly pins `harness.id="alphaverse"`, so a
+partial override such as `harness.tool_timeout` keeps that harness. Setting a
+different `harness.id` remains supported. Explicitly include the harness ID in
+external config layers and adaptive-role overrides.
+
+Gameplay limits are optional:
+
+- `env.taskset.max_market_time_ns`: market horizon, default 1,800 seconds; use
+  `None` to disable it.
+- `env.taskset.model_turn_cap`: enforced task-level turn limit, default `None`.
+- `env.agent.max_turns`, `max_input_tokens`, `max_output_tokens`, and
+  `max_total_tokens`: optional Verifiers limits, all unset by default.
+- `env.episode_time_limit_seconds`: optional single-player play-time budget,
+  default `None`; excludes setup and leaves time for closeout.
+
+Limit-ended runs liquidate and receive the same raw-PnL reward, with
+`info.alphaverse.outcome="limit_reached"` and the specific `limit_reached` value.
+No-limit normal completion is recorded as `outcome="completed"`. Use `None` on
+the CLI, or the string `"None"` in TOML, to disable an optional limit. Framework
+phase/watchdog timeouts (`env.timeout.*`, `env.agent.timeout.*`) remain failure
+guards, not gameplay limits: provider failures, unsafe hard interruptions, and
+failed liquidation are not converted to fabricated scores.
+
+[`natural-completion.local.toml`](../../configs/alphaverse/natural-completion.local.toml)
+uses the ordinary task prompt with no turn, token, market-time, or gameplay
+wall-time cap. Its separate outer watchdog marks a stalled validation attempt as
+a failure. It uses paid inference, unlike the scripted
+[`bounded-tools.local.toml`](../../configs/alphaverse/bounded-tools.local.toml) probe.
+
 A short two-agent deployment/intermission/streaming check is available in
 [`configs/alphaverse/isolation-smoke.local.toml`](../../configs/alphaverse/isolation-smoke.local.toml).
 It deliberately prompts for mechanical actions and is not an economic benchmark:

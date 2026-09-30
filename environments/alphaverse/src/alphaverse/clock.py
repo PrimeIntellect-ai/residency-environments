@@ -11,6 +11,7 @@ import heapq
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, TypeVar, cast
 
+from alphaverse.execution_limits import check_simulation_slice
 from alphaverse.models import MarketTime, Sequence
 
 PayloadT = TypeVar("PayloadT")
@@ -199,6 +200,7 @@ class VirtualClock(Generic[PayloadT]):
                 raise ValueError("max_events must be positive")
         processed: list[ScheduledEvent[PayloadT]] = []
         while (event := self.peek()) is not None and event.market_time <= target:
+            check_simulation_slice()
             if max_events is not None and len(processed) >= max_events:
                 raise EventProcessingLimitExceeded(
                     processed_events=len(processed),
@@ -237,6 +239,7 @@ class VirtualClock(Generic[PayloadT]):
             self._discard_cancelled_head()
             if not self._heap or self._heap[0][0] > target:
                 break
+            check_simulation_slice()
             if max_events is not None and processed >= max_events:
                 raise EventProcessingLimitExceeded(
                     processed_events=processed,

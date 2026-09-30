@@ -185,7 +185,14 @@ class AlphaverseAdaptiveEnv(vf.Env[AlphaverseAdaptiveEnvConfig]):
         name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        return await call_mcp_tool(cls._embedded_toolset_url(interaction), name, arguments)
+        return await call_mcp_tool(
+            cls._embedded_toolset_url(interaction),
+            name,
+            arguments,
+            timeout_seconds=(
+                interaction.trace.state.tool_timeout_seconds + interaction.trace.state.cleanup_timeout_seconds + 5
+            ),
+        )
 
     @staticmethod
     def _coordinator_token(interaction) -> str:
@@ -204,6 +211,9 @@ class AlphaverseAdaptiveEnv(vf.Env[AlphaverseAdaptiveEnvConfig]):
             cls._embedded_toolset_url(interaction),
             cls._coordinator_token(interaction),
             request,
+            timeout_seconds=(
+                interaction.trace.state.tool_timeout_seconds + interaction.trace.state.cleanup_timeout_seconds + 5
+            ),
         )
 
     async def _status(

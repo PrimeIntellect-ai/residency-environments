@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import threading
+import time
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 
 from verifiers.v1.errors import SandboxError
 from verifiers.v1.runtimes import DockerConfig, PrimeConfig, RuntimeConfig, provision_runtime
@@ -17,6 +20,16 @@ from alphaverse.strategy.sdk import Strategy
 
 MAX_RESPONSE_BYTES = 1_048_576
 MAX_STDERR_BYTES = 1_048_576
+
+
+@dataclass(frozen=True)
+class TradingRuntimeTimeouts:
+    startup_seconds: float = 60.0
+    cleanup_seconds: float = 10.0
+
+    def __post_init__(self) -> None:
+        if any(not math.isfinite(value) or value <= 0 for value in (self.startup_seconds, self.cleanup_seconds)):
+            raise ValueError("trading runtime timeouts must be positive and finite")
 
 
 def validate_trading_runtime(config: RuntimeConfig) -> None:
@@ -45,6 +58,7 @@ class RuntimeStrategy(Strategy):
         callback_timeout_ns: int = 1_000_000_000,
         memory_limit_bytes: int = 256 * 1024 * 1024,
         runtime_config: RuntimeConfig | None = None,
+        timeouts: TradingRuntimeTimeouts | None = None,
     ) -> None:
         if callback_timeout_ns <= 0 or memory_limit_bytes <= 0 or max_actions_per_callback <= 0:
             raise ValueError("strategy resource limits must be positive")
@@ -58,6 +72,7 @@ class RuntimeStrategy(Strategy):
             }
         )
         self.artifact = artifact
+        self.timeouts = timeouts or TradingRuntimeTimeouts()
         self.callback_timeout = callback_timeout_ns / 1_000_000_000
         self.max_actions = max_actions_per_callback
         self._closed = False
@@ -68,7 +83,9 @@ class RuntimeStrategy(Strategy):
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._serve, name="alphaverse-trading-runtime", daemon=True)
         self._thread.start()
-        self._ready.wait()
+        if not self._ready.wait(timeout=min(5.0, self.timeouts.startup_seconds)):
+            self._closed = True
+            raise StrategyInfrastructureError("trading runtime event loop did not start")
         arguments = [
             "/trading/strategy.py",
             artifact.entrypoint,
@@ -81,7 +98,7 @@ class RuntimeStrategy(Strategy):
             str(memory_limit_bytes),
         ]
         try:
-            self._submit(self._start(arguments))
+            self._submit(self._start(arguments), timeout=self.timeouts.startup_seconds + self.callback_timeout + 1)
         except BaseException:
             self.close()
             raise
@@ -95,9 +112,11 @@ class RuntimeStrategy(Strategy):
         self._stop = asyncio.Event()
         self._stack = AsyncExitStack()
         self._ready.set()
+        if self._closed:
+            return
         await self._stop.wait()
 
-    def _submit(self, coroutine):
+    def _submit(self, coroutine, *, timeout: float | None = None):
         if self._closed:
             coroutine.close()
             raise RuntimeError("trading runtime is closed")
@@ -105,13 +124,19 @@ class RuntimeStrategy(Strategy):
         try:
             # Preserve event -> action ordering: each remote callback round trip
             # blocks the simulation here, even when its action batch is empty.
-            return future.result()
+            return future.result(timeout=timeout if timeout is not None else self.callback_timeout + 1)
+        except TimeoutError as exc:
+            future.cancel()
+            raise StrategyInfrastructureError("trading runtime bridge exceeded its deadline") from exc
         except SandboxError as exc:
             raise StrategyInfrastructureError(f"trading runtime provider failed: {type(exc).__name__}") from exc
+        except BaseException:
+            future.cancel()
+            raise
 
     async def _start(self, arguments: list[str]) -> None:
         try:
-            async with asyncio.timeout(900):
+            async with asyncio.timeout(self.timeouts.startup_seconds):
                 self._runtime = await self._stack.enter_async_context(provision_runtime(self.config))
                 await self._runtime.prepare_setup()
                 for path, contents in public_strategy_files().items():
@@ -176,14 +201,17 @@ class RuntimeStrategy(Strategy):
         self._request_number += 1
         request_id = self._request_number
         message = {"request_id": request_id, **payload}
-        async with asyncio.timeout(self.callback_timeout):
-            try:
-                await self._process.write(json.dumps(message, separators=(",", ":")).encode() + b"\n")
-            except (BrokenPipeError, ConnectionResetError) as exc:
-                raise RuntimeError("strategy process closed its input") from exc
-            except Exception as exc:
-                raise StrategyInfrastructureError(f"trading input transport failed: {type(exc).__name__}") from exc
-            response = await self._read_message()
+        try:
+            async with asyncio.timeout(self.callback_timeout):
+                try:
+                    await self._process.write(json.dumps(message, separators=(",", ":")).encode() + b"\n")
+                except (BrokenPipeError, ConnectionResetError) as exc:
+                    raise RuntimeError("strategy process closed its input") from exc
+                except Exception as exc:
+                    raise StrategyInfrastructureError(f"trading input transport failed: {type(exc).__name__}") from exc
+                response = await self._read_message()
+        except TimeoutError as exc:
+            raise RuntimeError("strategy callback exceeded its deadline") from exc
         if type(response.get("request_id")) is not int or response["request_id"] != request_id:
             raise ValueError("strategy response belongs to another callback")
         return response
@@ -211,11 +239,15 @@ class RuntimeStrategy(Strategy):
         return self._submit(self._exchange(event))
 
     async def _shutdown(self) -> None:
+        async with asyncio.timeout(self.timeouts.cleanup_seconds):
+            await self._shutdown_resources()
+
+    async def _shutdown_resources(self) -> None:
         try:
             process = getattr(self, "_process", None)
             if process is not None:
                 try:
-                    async with asyncio.timeout(5):
+                    async with asyncio.timeout(min(5.0, self.timeouts.cleanup_seconds / 2)):
                         await process.terminate()
                         await process.wait()
                 except TimeoutError:
@@ -232,12 +264,15 @@ class RuntimeStrategy(Strategy):
     def close(self) -> None:
         if self._closed:
             return
+        deadline = time.monotonic() + self.timeouts.cleanup_seconds + 1
         try:
-            self._submit(self._shutdown())
+            self._submit(self._shutdown(), timeout=self.timeouts.cleanup_seconds)
         finally:
             self._closed = True
             self._loop.call_soon_threadsafe(self._stop.set)
-            self._thread.join()
+            self._thread.join(timeout=max(0, deadline - time.monotonic()))
+        if self._thread.is_alive():
+            raise StrategyInfrastructureError("trading runtime thread did not stop before its cleanup deadline")
 
     def on_start(self, ctx, event):
         return self._handle(event)

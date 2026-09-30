@@ -54,6 +54,11 @@ the episode, cancels live orders, and attempts ordinary-book liquidation just
 like explicit termination. You may use bounded `wait` intervals to let a
 deployed strategy run without emitting model tokens.
 
+A long wait may return early with `yielded_for_budget=true` to keep each tool
+call responsive. Continue using the returned absolute `requested_until` target;
+do not assume the full requested duration elapsed. Pending market events remain
+queued in their original order.
+
 Some episodes use scheduled market sessions. In those episodes, wait responses
 include `market_session`. At an `intermission` the entire simulation clock is
 frozen and inference is not charged as market time. You receive a dedicated

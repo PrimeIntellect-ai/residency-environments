@@ -20,6 +20,11 @@ import urllib.request
 
 url, delay, exit_mode, side = sys.argv[1], float(sys.argv[2]), sys.argv[3], sys.argv[4]
 quantity = int(sys.argv[5])
+strategy_mode, require_yield = sys.argv[6], sys.argv[7] == "True"
+pause_seconds = float(sys.argv[8])
+expect_tool_error = sys.argv[9] == "True"
+wait_duration_ns = int(sys.argv[10])
+timings = []
 def request(method, params):
     data = json.dumps({"jsonrpc":"2.0", "id":1, "method":method, "params":params}).encode()
     req = urllib.request.Request(url, data=data, headers={
@@ -35,7 +40,9 @@ names = {t["name"] for t in request("tools/list", {})["tools"]}
 def call(name, arguments):
     time.sleep(delay)
     name = name if name in names else "alphaverse_" + name
+    started = time.monotonic()
     result = request("tools/call", {"name":name, "arguments":arguments})
+    timings.append({"tool":name, "seconds":time.monotonic() - started})
     if result.get("isError"):
         raise RuntimeError(result["content"])
     return json.loads(result["content"][0]["text"])
@@ -43,23 +50,50 @@ call("product_terms", {})
 initial = call("wait", {"duration_ns":0, "wake_on_alert":False})["market_time"]
 after_delay = call("wait", {"duration_ns":0, "wake_on_alert":False})["market_time"]
 assert after_delay == initial, (initial, after_delay)
-call("deploy_strategy", {"source":"from alphaverse.strategy import Strategy\nclass StrategyImpl(Strategy): pass\n",
-    "entrypoint":"strategy:StrategyImpl"})
+source = "from alphaverse.strategy import Strategy\nclass StrategyImpl(Strategy): pass\n"
+if strategy_mode == "busy":
+    source = "from alphaverse.strategy import Strategy\nclass StrategyImpl(Strategy):\n    def on_start(self, ctx, event):\n        while True: pass\n"
+try:
+    call("deploy_strategy", {"source":source, "entrypoint":"strategy:StrategyImpl"})
+except RuntimeError as exc:
+    if not expect_tool_error:
+        raise
+    print(json.dumps({"expected_tool_error":str(exc), "tool_timings":timings}))
+    sys.exit(0)
+if expect_tool_error:
+    raise RuntimeError("expected a deployment deadline error")
 call("submit_limit_order", {"client_order_id":"clock-probe-" + side, "side":side,
     "price":11000 if side == "buy" else 1, "quantity":quantity})
-after_wait = call("wait", {"duration_ns":2_000_000_000, "wake_on_alert":False})["market_time"]
-assert after_wait == initial + 2_000_000_000, (initial, after_wait)
+yield_count = 0
+def wait_to(target):
+    global yield_count
+    for _ in range(1000):
+        response = call("wait", {"until_ns":target, "wake_on_alert":False})
+        if not response.get("yielded_for_budget"):
+            return response["market_time"]
+        yield_count += 1
+        assert response["requested_until"] == target, response
+    raise RuntimeError("wait did not finish within 1000 slices")
+after_wait = wait_to(initial + wait_duration_ns)
+assert after_wait == initial + wait_duration_ns, (initial, after_wait)
+if require_yield:
+    assert yield_count > 0, "expected a bounded wait slice"
+strategy_status = call("strategy_status", {})
+if strategy_mode == "busy":
+    assert not strategy_status["active"] and "deadline" in strategy_status["fault"], strategy_status
 capture = call("capture_market_data", {"feed":"levels", "after_cursor":0, "limit":100})
 account = call("account", {})
+time.sleep(pause_seconds)
 if exit_mode == "explicit":
     terminal = call("terminate_session", {})
     assert terminal["time_mode"] == "manual", terminal["time_mode"]
 elif exit_mode == "horizon":
-    call("wait", {"duration_ns":20_000_000_000, "wake_on_alert":False})
+    wait_to(20_000_000_000)
 observations = {"capture":capture, "account":account, "initial":initial, "after_wait":after_wait}
 print(json.dumps({"initial_market_time":initial, "after_delay_market_time":after_delay,
     "after_wait_market_time":after_wait, "time_mode":"manual", "exit_mode":exit_mode,
     "side":side, "account_before_closeout":account,
+    "yield_count":yield_count, "strategy_status":strategy_status, "tool_timings":timings,
     "observations_sha256":hashlib.sha256(json.dumps(observations, sort_keys=True).encode()).hexdigest()}))
 """
 
@@ -69,6 +103,11 @@ class ClockProbeHarnessConfig(HarnessConfig):
     exit_mode: Literal["explicit", "harness", "horizon"] = "explicit"
     side: Literal["buy", "sell"] = "buy"
     quantity: int = Field(default=1, ge=1)
+    strategy_mode: Literal["noop", "busy"] = "noop"
+    require_yield: bool = False
+    pause_seconds: float = Field(default=0.0, ge=0, le=300)
+    expect_tool_error: bool = False
+    wait_duration_ns: int = Field(default=2_000_000_000, gt=0)
 
 
 class ClockProbeHarness(Harness[ClockProbeHarnessConfig]):
@@ -91,12 +130,20 @@ class ClockProbeHarness(Harness[ClockProbeHarnessConfig]):
                     self.config.exit_mode,
                     self.config.side,
                     str(self.config.quantity),
+                    self.config.strategy_mode,
+                    str(self.config.require_yield),
+                    str(self.config.pause_seconds),
+                    str(self.config.expect_tool_error),
+                    str(self.config.wait_duration_ns),
                 ],
                 {},
             )
             if result.exit_code != 0:
                 raise RuntimeError(f"clock probe failed: {result.stderr[-2000:]}")
             evidence = json.loads(result.stdout)
+            if self.config.expect_tool_error:
+                trace.info["clock_probe"] = evidence
+                return result
             if self.config.exit_mode == "harness":
                 trace.info["clock_probe"] = evidence
                 return result

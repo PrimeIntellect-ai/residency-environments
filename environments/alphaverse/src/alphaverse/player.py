@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from alphaverse.clock import EventProcessingLimitExceeded
 from alphaverse.episode import ActionReceipt, Episode
 from alphaverse.exchange import TerminationResult
+from alphaverse.execution_limits import SimulationSliceExpired
 from alphaverse.models import Side
 from alphaverse.profiles import ParticipantSpec
 from alphaverse.strategy import (
@@ -32,6 +33,8 @@ from alphaverse.strategy.errors import StrategyInfrastructureError
 
 if TYPE_CHECKING:
     from verifiers.v1.runtimes import RuntimeConfig
+
+    from alphaverse.strategy.runtime import TradingRuntimeTimeouts
 
 
 class _PlayerInbox:
@@ -287,6 +290,7 @@ class WaitResult:
     target_market_time: int
     interrupted_by_alert: bool
     alert_cursor: int | None = None
+    interrupted_by_budget: bool = False
 
 
 @dataclass(slots=True)
@@ -325,6 +329,7 @@ class PlayerSession:
         simulation_step_ns: int = 5_000_000_000,
         max_scheduled_events_per_step: int = 250_000,
         strategy_runtime: RuntimeConfig | None = None,
+        strategy_timeouts: TradingRuntimeTimeouts | None = None,
     ) -> None:
         if simulation_step_ns <= 0:
             raise ValueError("simulation_step_ns must be positive")
@@ -334,6 +339,7 @@ class PlayerSession:
         self.participant_id = focal_spec.participant_id
         self.spec = focal_spec
         self._strategy_runtime = strategy_runtime
+        self._strategy_timeouts = strategy_timeouts
         self._simulation_step_ns = simulation_step_ns
         self._max_scheduled_events_per_step = max_scheduled_events_per_step
         self._strategy = _PlayerStrategy()
@@ -444,7 +450,7 @@ class PlayerSession:
                 raise TypeError("until must be an int")
             target = until
         result = self._run_bounded(target, interrupt_on_alert=interrupt_on_alert)
-        return result if interrupt_on_alert else self.now
+        return result if interrupt_on_alert or result.interrupted_by_budget else self.now
 
     def _run_bounded(
         self,
@@ -479,6 +485,13 @@ class PlayerSession:
                         interrupted_by_alert=True,
                         alert_cursor=self._strategy.last_alert_cursor,
                     )
+            except SimulationSliceExpired:
+                return WaitResult(
+                    market_time=self.now,
+                    target_market_time=target,
+                    interrupted_by_alert=False,
+                    interrupted_by_budget=True,
+                )
             except EventProcessingLimitExceeded as exc:
                 if self._automation is not None:
                     self._fault_automation(str(exc))
@@ -867,6 +880,7 @@ class PlayerSession:
             callback_timeout_ns=self.spec.technology.callback_timeout_ns,
             memory_limit_bytes=self.spec.technology.callback_memory_limit_bytes,
             runtime_config=self._strategy_runtime,
+            timeouts=self._strategy_timeouts,
         )
 
     def discard_staged_source(self, fault: str | None = None) -> None:
