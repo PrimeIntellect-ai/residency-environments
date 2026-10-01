@@ -1,0 +1,1570 @@
+{
+  "assignments": [
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "ebe4ff135d629baa40ac0b1c2a732fc4f5913d763bf6884b35bca6e54f0ad34b",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d1.s120"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "9810fa46a88a7c6fe2b95da61ec70d2cb13aca93f5c4c845a5c7fae8d5c43879",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d1.s121"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "3a05238f41268471b194753d91dc2c548ae724256dd5711b240b47e456453fc6",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d1.s122"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "be70bac15c483f6863cc8da84c2325f56c6d35718839fcce8ebc2170b6090e0d",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d1.s123"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "6d878d8f3521d7ff2440f389cf4ee0b36f6f10d54eccf5dd6926b359456f8338",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d1.s124"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "4a9a5accd44fae051d4a64fb059b4b1b46fc495a981ea6f4b912c46c32ccbe08",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d1.s125"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "27f5f77050a11b894b9bdd3f0549a5546b5fe9aa7baf0a08222414b55da33468",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d1.s126"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "933ff88504e6ae62411eace146e39d5b481d991e9a174e003186f0e76db4fce1",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d1.s127"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "9904c824a7e2382d1b5ce9919f0c4de9d7378965711436386792644552f10490",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d2.s120"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "b5dbcf768e7a1cee5e6d7e85dfc48e1e28acb21dc3c234465f6a80d3b5feafcb",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d2.s121"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "0b916e0e85985802ecdc15e2e26f4f36b4330708d4840973a15a3116e15c40c8",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d2.s122"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "0dded74f419e5a25268e0bb7033f6ac7b8df0d634ace7f928a3b1e7980af52d0",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d2.s123"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "7b03eca006cdf97b420d42ec142af30330965271bd6d3deb841897242a861a84",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d2.s124"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "810efb39b79417d6630452d5a5e41fb794e963b63a393d6a697751d53cb92db0",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d2.s125"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "0049f839aa7e112f009d75f27e683098716351ac5bd4d3e33aaea6723603981d",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d2.s126"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "e5ea450eaff797992b873d60d645158d4a19587bcb3a25e88bf129d386878875",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d2.s127"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "76d62f517d07a43bae1b2c8a9e55b492b72e12b56c3278e64b500efa77a61e55",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d3.s120"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "f09844378807b0ec550d22c4daec16858dbcbd328a8649279a3eb3cae2b6c6b6",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d3.s121"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "c908e2740189c0588e2881202f7170763ad9305be487c535395ea9bc92aae110",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d3.s122"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "c9ad690f04531468f27cb51a63f3ef8985b1c770e79b77670ea1cbbe593c197b",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d3.s123"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "1bca0a28b8a087ff7a1f529857279bf8e99bf581f5d417783069353f8d3dadbb",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d3.s124"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "5d4821caa1c67fb81b83ae4283b057c984ba2492ee802436a5de929771cc5d11",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d3.s125"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "5eb16cf5ac494f1a5b53e406d8491125dc6344a0b90c08be6a4a83c0c41aa155",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d3.s126"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "1d409cc79e375d728a0e16b2d1c23e0b26ee4dc3218537889f6a42c9da8cd522",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.tabular.supplier_restock_summary.d3.s127"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "00d8d9de765ff6ee63fff04450824526df3ab21a32e2294d25a5eb37aba61b47",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d1.s120"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "d6db20d5846330a5d12255c3458384c75d7cc4f63abd2d4512ab9076ba02cf8f",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d1.s121"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "c30331e2b5365f232830f80e38a48bd907302eadd57f5c6ecb1ad9790da8395e",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d1.s122"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "997a923734abe1bf58c037a0ce38b569715a5d3d6569b61699931f42589c7d7e",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d1.s123"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "195b9b40331e47256d3eaf7d3d58640eb1233a0208d2b49a074487213baa2b48",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d1.s124"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "705ecbe8df7dd2e7c3cd95218144dfa6061193177f6caa43a4dcd1cae0e4ca4e",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d1.s125"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "472b3fd461366edd366aacb6914b49488786e88b950e8d9b9dcce881b5a79082",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d1.s126"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "8eb83aa7631eccd0eadb52b94867e5fbc45b844e484b015bc5b06357aad7806c",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d1.s127"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "68cbf91aa96766d3e373019f627509a7b0b650722a9bef63367a9f220fdd486f",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d2.s120"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "c9a756689852e0f398738bfbf32f07b7dca15240e430929b0aa378a2d9c314af",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d2.s121"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "5177f550200616153ca93409d9cfa3e5aabf821c06e8bceadf38867dfc15d919",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d2.s122"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "4f8d1516bcc8d07ae93787bab5fb310aa17994d5029ae4f9e67b56834b2eeca0",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d2.s123"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "e1944725f4fe8bb014222d1962c416734ee19a10e9158dbcfef85fc5fa3bc29e",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d2.s124"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "ceae7a0a952f74d67d388e8bc43c4ff520a2b08871f522f2390a9247e2ecee4a",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d2.s125"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "3d76be8ae8cf7a78e2076702b51eea3a3312a156a597868316637557437556b7",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d2.s126"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "9488baf8c7533df84949c1c15a6a1872afd50fa16e59f7358e9b7b921ff6e6a0",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d2.s127"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "84ed3f51797af1228327096abc513de0608f1ba1ca2177e164840aae5e2ca742",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d3.s120"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "4e23b2394ff52f8197f3f0ba4f4d0480af6697da4c397f11e6fce614d0744a09",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d3.s121"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "de8b10876126cab0b0408cf1fd85a9632ba580fb6231175470e0fbfc3485a637",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d3.s122"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "681ec5014cb6cadeb932408888a4b2327ba8b6abe37ef0e988a36146e771d24d",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d3.s123"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "b46e08c577632ec0fb91d9e891c2595e941f88298b214d3b4900c2a99e418e29",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d3.s124"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "006334984c5dab1b09aef11dafa9bdedb577a7ecd1a832fcddd8bdf1a1079544",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d3.s125"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "9eedef622941a25ce3816fcde6b0af30085dff25d5dc622f9b8f7589f788b080",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d3.s126"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "bccbd544d7451a7401264307819d0f9e7051ee2067321cb6f57465b2c69a9334",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "team_roster_export",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.script_repair.team_roster_export.d3.s127"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "31b2a59dbdbcceeea6cc2c704bdc40a2c65ab5242f3360e3d47f82275e9e08f9",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d1.s120"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "a80c48ed363e229ba168ae0643a3bddf592c12368bfd0ada2088551952fa7131",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d1.s121"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "e65b11eeebc8b1740de621c183e0d146b24bda8ecb9283b66f7d9233a6bce26d",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d1.s122"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "a9ee60a0c763204328a9048bbf175434aceebffd83eba0fecd433a1d8061ea53",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d1.s123"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "6d8b9a0c8942221e1ef1860d72f7973df3245f16e19e8a71652e3c832707b51a",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d1.s124"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "c0d16875dc3de9a110e55be8aebaa9bd4e6fd3b05e6bc3e60d4d947815d47e84",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d1.s125"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "6b30f8f971a2d9c6fd40df0b2334c688724269c8afe01278dfc77c8f9cf80b62",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d1.s126"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "b88746f9afa29df49c36907f6d39a0fd930cc4fea4d3d0f81a55860df85ba7b6",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d1.s127"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "aca2346463b6d05f824b5b20f97f2a10c9979ecb6ba04a40303cffac2cec8971",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d2.s120"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "7f5e4c7caf008b97731711bafcecab27214e62b3cd7814561d4e51d44d6e028c",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d2.s121"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "110b6c7fe09d756204ee8ef130d18db50a26c03f69c64ba3af4c5a6f5a321450",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d2.s122"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "0191bbfe50c0653afd9ec6c15a406086f6bab9b89c6472262e9cd5a256d9b0fb",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d2.s123"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "7f89647ad4bf8ce06b40661e4949405f6018cd265550459c20aa927d6b43587a",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d2.s124"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "64fa22bd7b6686066ab2d78496fb4d61c99e5d1a8df40cf2abeb79eef7d85bfb",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d2.s125"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "b4665b35017ce2bcfd0c0420efff0cfd9c11849c63cce8e1bb8fb221ed6e260d",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d2.s126"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "a4f1994f9f55efc48e9dcf427d65367c1a52fa507dcbd25b7f5f7873e67ee051",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d2.s127"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "14c110878eadb670fb584a621c180b6fa6446f3f834b9d2e00dc47cc78b74653",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d3.s120"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "924775075dda6d8da89ccd3c38668208184dcf6c7d004e432b7efaf187fa0706",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d3.s121"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "fb62c7e97eb9bd2e4e6cb080a21fa95f4c41a4616f773c19816d532dc9d6eada",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d3.s122"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "7ab855f754f5ded85fb21f9d37232327471ca24dc48f017bd3c79b131153ea47",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d3.s123"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "d9e4f14e66b8ad888b195e90baf14f1ef3df5fb57594a1a72dffa1c4fc2a6b08",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d3.s124"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "5956c62dd2bedf1a369d81307752025a7ba264465062887eb5b9c4ad461c8e56",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d3.s125"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "03ecbcbe0a85c791da398a5af6830f03dbeb1840391f77af419da575966f7481",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d3.s126"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "54c9c537116216172dc972b59b11fa98d555fb15f8a941180143f297e8c90697",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.pipeline.quality_gate_pipeline.d3.s127"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "e39feb7e15f6f482c7a1d9b587631bf24f2e85136df87ee8daacd5bfae976001",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d1.s120"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "a18ddd8fe520fb3a0cfeb8ad6b543ab200dbd74633c6dc2fec4792e4bebfc07d",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d1.s121"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "81bc72e0a05b4b4aea049518735b9883152e7a519f8469e7736c4b67a10fd99b",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d1.s122"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "64a3bd6d3755eeb7f7dfc8fcc3a5670f27caf3f94691a0a29873ee13590b8942",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d1.s123"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "fbb9b4613b3786695273b795ca0de9de7246ad315d9b3052f5c371d84bf74af9",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d1.s124"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "d959ff997afff352c7c6be2de5224b7890683a7cee604d53c89d17de62e7d97d",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d1.s125"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "aea70e5f8cabe8a35d0506ed7b8b15dcfd4c1d69468c5f872d64841815fb9eaf",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d1.s126"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "4d45532a5267a0a68c3767c0b12bc2accbcf9c2cd05c50f4599e7e0ed3314656",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d1.s127"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "c42b78784cd2bc2af14c6cf9eaeb16832adc92f83282482263cf2a6750a0afe6",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d2.s120"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "0c42f84e30ec02976ef4094cfff77c8b0a1352c9da179113b8b1ad7878a9d2e6",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d2.s121"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "6215b589059013d9196b4e69b40ee427d10098b10444053da6adcb3caa206e2a",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d2.s122"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "278fbe211ee9260e82a436f1c351f687480b134e50f257e3a246b2a2b251b013",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d2.s123"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "ea58dde74c40501443fcba149ee7e1ba0e09a644afa889cc75717a9f1d843a1c",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d2.s124"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "91782cc24e75d9f2e8d63431384d9c942e7512d69929c47e1d149ea613207fb3",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d2.s125"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "2ed63b2c9ea3de975cd2ec45918897936e178c9ba5898144f0446f125b86e8ef",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d2.s126"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "9e031582bbf2131ba45d14853fb10de46a359814fecaff359edfca566bba8925",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d2.s127"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "5f17bbdd46146b5f0d1a47300595489b13e686fab9b58a33cbf5ee067225e756",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 120,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d3.s120"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "ea5df2d729506f544e9949e4acebbc94bfa373f7ac1e85dd42f2b6b1d3b51543",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 121,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d3.s121"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "bca3949b6ad42281e03a9e94acf573b3a220c20e8d207923d34994849b7f7bf2",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 122,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d3.s122"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "7ef5800658099e045e74ea356d93aaaa5706091ac02a4a9a2658cf27da647a7f",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 123,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d3.s123"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "9b959d51a457acb4a50877822e580305d7ad0e4a94a63653654eea6178ce30c4",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 124,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d3.s124"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "5edf2b532f2912f2c8c1059e6f8cccea7a130b3c76684d908330e8c9df0efef8",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 125,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d3.s125"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "3ffed89acc4b04d4fd83b04dc3d139b0803aa39b8435696b91c8199f156329d7",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 126,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d3.s126"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "d47ab75f52d1dac08070db7061cb8242fefc503956c7f4e96e50748f709c5b2c",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "sft-validation-v4"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 127,
+      "split": "sft_validation",
+      "task_id": "swg.sft_validation.retrieval_workspace.client_adapter_sync.d3.s127"
+    }
+  ],
+  "created_at": "2026-09-21T00:00:00+05:30",
+  "metadata": {
+    "assignment_count": 96,
+    "curriculum": "family_stratified_easy_atomic_heldout",
+    "difficulty_range": [
+      1,
+      3
+    ],
+    "disjoint_from": [
+      "sft-easy-v4"
+    ],
+    "environment_version": "0.2.0.dev1",
+    "frozen": true,
+    "manifest_fingerprint": "93546694f0d0649497a0820088cdf86cd84021ef21f2a2163af3925db746d4c5",
+    "reporting_strata": [
+      "family",
+      "difficulty"
+    ],
+    "scenario_partition": "heldout",
+    "seed_range": [
+      120,
+      127
+    ],
+    "supersedes": "sft-validation-v3",
+    "training_purpose": "supervised_validation",
+    "training_readiness_correction": "canonical-lf-and-evaluator-identical-baselines-v1"
+  },
+  "name": "sft-validation-v4",
+  "split_specs": {},
+  "version": "v4"
+}
