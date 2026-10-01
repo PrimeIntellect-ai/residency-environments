@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = ["blobkit @ https://github.com/swpo/physim/releases/download/blobkit-v0.3.5/blobkit-0.3.5-py3-none-any.whl#sha256=6747e7ebe26e3909c05d91d050ebce93715d08992c51498cbf480b8206224331", "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@e66ec52966327e79011f4c3bb34a0f9817ce32b8", "numpy==2.5.2", "scipy==1.18.0", "huggingface-hub>=1.0,<2"]
+dependencies = ["blobkit @ https://github.com/swpo/physim/releases/download/blobkit-v0.3.5/blobkit-0.3.5-py3-none-any.whl#sha256=6747e7ebe26e3909c05d91d050ebce93715d08992c51498cbf480b8206224331", "verifiers @ git+https://github.com/swpo/verifiers.git@a24f5e216d14a060e117396387f788c9555673a0", "numpy==2.5.2", "scipy==1.18.0", "huggingface-hub>=1.0,<2"]
 
 [project.optional-dependencies]
 agent = [] # Compatibility with the previous local installation command.

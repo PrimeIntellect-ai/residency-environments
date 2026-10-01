@@ -15,11 +15,14 @@ the measurements mean, and how they relate to one another through experiments.
 
 An experiment consists of two lists: `actions` describes what to do and when;
 `queries` describes which measurements to request and when. Submit both lists
-to `laboratory_experiment(actions, queries)`. Each experiment resets the world
+to the laboratory `experiment` operation. Each experiment resets the world
 and apparatus to the same starting condition at time 0, then executes the
 specified program. Repeating a request can yield different measurements.
 Each program is supplied in full; actions cannot depend on readings obtained
 within that experiment.
+
+Call laboratory operations through the tool names or MCP wrappers advertised
+by your harness. Follow their actual signatures and calling instructions.
 
 ### Actions
 
@@ -78,7 +81,7 @@ JSON number types are required; booleans are not numbers or integer IDs.
 
 ### Reading observations
 
-`laboratory_experiment` saves measurements to an NPZ file in `/observations`
+The laboratory `experiment` operation saves measurements to an NPZ file in `/observations`
 and returns its path, array shapes, and experiment usage. Each file contains
 the request and one array per query. Read them together:
 
@@ -129,11 +132,11 @@ or infinities are accepted. Handle different query orders, requested times,
 and sample counts. Empty query lists and empty time lists require correspondingly
 empty outputs; graded requests contain at least one measurement.
 
-Use `laboratory_validate()` while developing the predictor. It checks that the
+Use the laboratory `validate` operation while developing the predictor. It checks that the
 code imports, executes, and returns valid, repeatable outputs on example requests.
 It does not submit the predictor or provide prediction-accuracy feedback.
 
-When ready, call `laboratory_submit()`. It checks and freezes the current
+When ready, call the laboratory `submit` operation. It checks and freezes the current
 predictor and supporting files. A failed check leaves the workspace open for
 repair; a successful submission ends experimentation. Finish the session once
 submission is accepted. If the session ends with `predictor.py` written, its
@@ -166,7 +169,7 @@ The experiment budget is {max_experiments} experiments and {max_total_tu}
 integrated time units. Each admitted request consumes one experiment and its
 largest query timestamp in time units. Empty requests consume one experiment
 and zero time units. Invalid requests consume neither; an admitted execution
-that fails retains its charge. `laboratory_usage()` reports consumption, limits,
+that fails retains its charge. The laboratory `usage` operation reports consumption, limits,
 and validation/submission attempt counts. Validation attempts: {max_validation_attempts};
 submission attempts: {max_submission_attempts}. Neither consumes experiments or
 time units.

@@ -70,6 +70,8 @@ def main(args):
         ("laboratory_validate", {}),
         ("laboratory_submit", {}),
     ]
+    if args.completion == "collect":
+        steps.pop()
     calls = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -101,7 +103,7 @@ def main(args):
                 )
                 reason = "tool_calls"
             else:
-                content = "Boundary audit failed; stopping." if audit_failed else "Submitted."
+                content = "Boundary audit failed; stopping." if audit_failed else "Finished."
                 message, reason = dict(role="assistant", content=content), "stop"
             response = dict(
                 id=f"offline-{index}",
@@ -186,6 +188,12 @@ def main(args):
         trace = episode["traces"][-1]
         assert trace["ok"], trace.get("errors")
         info = trace["info"]["r6"]
+        audit = info["limit_audit"]
+        explicit = args.completion == "submit"
+        assert audit["submitted"] is True
+        assert audit["submitted_before_finalization"] is explicit
+        assert audit["artifact_source"] == ("agent_submission" if explicit else "final_collection")
+        assert audit["agent_submission_attempts"] == int(explicit)
         bundle = bundles[info["references"]["bundle"]]
         assert info["references"] == bundle.references()
         assert info["world_name"] == bundle.manifest["objects"]["world"]["name"]
@@ -209,6 +217,7 @@ def main(args):
     report = dict(
         ok=True,
         runtime=args.runtime,
+        completion=args.completion,
         tasks=len(tasks),
         rollouts=len(episodes),
         rollouts_per_task=args.rollouts,
@@ -232,4 +241,5 @@ if __name__ == "__main__":
     )
     parser.add_argument("--max-concurrent", type=int, default=1)
     parser.add_argument("--rollouts", type=int, default=2)
+    parser.add_argument("--completion", choices=["submit", "collect"], default="submit")
     main(parser.parse_args())

@@ -29,7 +29,7 @@ from .runtime_access import RuntimeAccess, request_access
 from .runtime_sandbox import PUBLIC_IMAGE, RuntimeSandbox, prepare_runtime, run_isolated
 from .sandbox import ExecutionLimits, SandboxInfrastructureError
 
-PROMPT_CONDITION = "interface-only-v3-log-reward"
+PROMPT_CONDITION = "interface-only-v4-portable-tools"
 PROTOCOL = f"r6-verifiers-v1-bash-1-{PROMPT_CONDITION}"
 AGENT_IMAGE = PUBLIC_IMAGE
 DEFAULT_CATALOG = dict(
@@ -47,6 +47,7 @@ class R6State(vf.State):
     reward_precision: float = DEFAULT_PRECISION
     output: str = ""
     submitted: bool = False
+    artifact_source: Literal["agent_submission", "final_collection"] | None = None
     artifact: str | None = None
     checks: list[dict] = Field(default_factory=list)
     experiments: list[dict] = Field(default_factory=list)
@@ -139,13 +140,9 @@ def public_prompt(config: R6ToolsConfig, coding_interface: str = "shell") -> str
     roster = public_roster(config)
     name = "agent_spec_v1.txt" if roster.protocol == E.E.R6.LEGACY_PROTOCOL else "agent_spec.txt"
     text = files("physim").joinpath("data", name).read_text()
-    coding_tools = "Use the bash and edit tools to run commands and work with files."
+    coding_tools = "Use the coding tools advertised by your harness to run commands and work with files."
     if coding_interface == "ipython":
-        coding_tools = (
-            "Use the harness's persistent IPython session to analyze data and write files.\n"
-            "Use the MCP skill wrappers advertised by the harness for laboratory calls;\n"
-            "follow their actual import and calling instructions."
-        )
+        coding_tools = "Use the harness's persistent IPython session to analyze data and write files."
     values = dict(
         n_ports=roster.n_ports,
         last_port=roster.n_ports - 1,
@@ -246,7 +243,7 @@ def recovery_prompt() -> str:
     )
 
 
-def _check(state: R6State, config: R6ToolsConfig, *, final: bool) -> dict:
+def _check(state: R6State, config: R6ToolsConfig, *, final: bool, automatic: bool = False) -> dict:
     if state.submitted:
         return dict(ok=True, accepted=True, finalized=True)
     kind = "submit" if final else "validate"
@@ -256,7 +253,7 @@ def _check(state: R6State, config: R6ToolsConfig, *, final: bool) -> dict:
         state.rejected_requests.append(dict(kind=kind, error="attempt limit reached", attempt=attempt))
         return dict(ok=False, error=f"{kind} attempt limit reached", finalized=False)
     target = Path(state.output) / f"{kind}_{attempt:02d}"
-    event = dict(kind=kind, attempt=attempt, path=target.name)
+    event = dict(kind=kind, attempt=attempt, path=target.name, automatic=automatic)
     state.checks.append(event)
     try:
         event["snapshot"] = _snapshot(state, target, config.predictor_limits)
@@ -277,6 +274,7 @@ def _check(state: R6State, config: R6ToolsConfig, *, final: bool) -> dict:
     event["validation"] = report
     if final and report["ok"]:
         state.submitted = True
+        state.artifact_source = "final_collection" if automatic else "agent_submission"
         state.artifact = str(target)
     E.dump(Path(state.output) / "laboratory_state.json", state.model_dump(exclude={"artifacts"}))
     return dict(report, finalized=state.submitted, accepted=final and report["ok"])
@@ -505,13 +503,6 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             raise vf.TaskError("Laboratory service failed; inspect the host diagnostic record")
         return False
 
-    @vf.stop
-    async def submitted(self, trace: vf.Trace) -> bool:
-        # This installed ACP adapter reports an externally stopped RLM prompt
-        # as a harness error. Let RLM return its final answer naturally; submit
-        # has already frozen the artifact and disabled further experiments.
-        return trace.state.submitted and self.config.coding_interface == "shell"
-
     async def finalize(self, trace, runtime):
         try:
             await self._finalize(trace, runtime)
@@ -529,19 +520,32 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             return
         # Stock VF ends naturally on final text or a configured limit. The task
         # collects the last executable artifact, without another model call.
+        submitted_before_finalization = state.submitted
         if not state.submitted:
-            report = await run_isolated(_check, state, self.config.tools, final=True)
+            report = await run_isolated(_check, state, self.config.tools, final=True, automatic=True)
             trace.info["r6"]["final_collection"] = report
         E.dump(Path(state.output) / "laboratory_state.json", state.model_dump(exclude={"artifacts"}))
         audit = dict(
             stop_condition=trace.stop_condition,
             truncated=trace.is_truncated,
             submitted=state.submitted,
+            submitted_before_finalization=submitted_before_finalization,
+            artifact_source=state.artifact_source,
+            harness_completed=trace.stop_condition == "agent_completed",
+            errors=[error.model_dump(mode="json") for error in trace.errors],
             final_collection=trace.info.get("r6", {}).get("final_collection"),
             model_turns=trace.num_turns,
             input_tokens=trace.num_input_tokens,
             output_tokens=trace.num_output_tokens,
             length_finished_calls=[i for i, call in enumerate(trace.calls) if call.finish_reason == "length"],
+            last_call=(
+                dict(
+                    finish_reason=trace.calls[-1].finish_reason,
+                    usage=trace.calls[-1].usage.model_dump(mode="json") if trace.calls[-1].usage is not None else None,
+                )
+                if trace.calls
+                else None
+            ),
             agent_limits={
                 name: getattr(trace.agent.config, name, None)
                 for name in ("max_turns", "max_input_tokens", "max_output_tokens", "max_total_tokens")
@@ -552,6 +556,9 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             rejected_requests=state.rejected_requests,
             validation_attempts=sum(c["kind"] == "validate" for c in state.checks),
             submission_attempts=sum(c["kind"] == "submit" for c in state.checks),
+            agent_submission_attempts=sum(
+                c["kind"] == "submit" and not c.get("automatic", False) for c in state.checks
+            ),
         )
         trace.info.setdefault("r6", {})["limit_audit"] = audit
         E.dump(Path(state.output) / "limit_audit.json", audit)
@@ -586,6 +593,7 @@ class R6Task(vf.Task[R6Data, R6State, R6TaskConfig]):
             },
             usage=state.usage,
             checkpoint=state.checkpoint,
+            artifact_source=state.artifact_source,
             spend=info.get("spend_final"),
             laboratory_state_sha256=E.file_digest(Path(state.output) / "laboratory_state.json"),
         )

@@ -20,6 +20,11 @@ The package pins its Blobkit release, current Verifiers commit, NumPy, and SciPy
 Hugging Face support is included. No local Blobkit checkout or separately selected
 extras are needed. The PyPI project named `physim` is unrelated.
 
+The Verifiers pin currently includes the framework fixes proposed in
+[Verifiers #2731](https://github.com/PrimeIntellect-ai/verifiers/pull/2731):
+output tokens counted once per model call, and native context settings for Pi
+and Prime Agent. This is a pinned fork commit pending upstream review.
+
 The default taskset contains **BF, p4g2_044, and XV**, one task per evaluation
 preparation in the catalog at pinned HF commit
 `bd77a0da2f14eef352bd80c4a38dff426e5c1bed`. Superseded preparations are absent
@@ -96,7 +101,15 @@ on the host, preserving Linux case-sensitive filenames on macOS too.
 Validation during investigation checks execution, output shapes, finite values,
 and seed reproducibility using public interface requests. It provides no physical
 accuracy feedback. Successful submission freezes one predictor for the whole
-suite; later workspace edits cannot change it.
+suite; later workspace edits cannot change it. The harness then finishes its
+response naturally. If a run stops before submission, finalization attempts to
+collect and validate the last predictor without another model call.
+
+`trace.info.r6.limit_audit` records `submitted_before_finalization` and
+`artifact_source` (`agent_submission`, `final_collection`, or null). A collected
+predictor is not evidence that the agent submitted it or completed its investigation.
+The same record includes the framework stop condition, truncation, provider
+length finishes, last-call usage, and any errors observed before grading.
 
 For local execution, select Docker for both runtimes:
 
@@ -135,9 +148,19 @@ Costs do not stop a run automatically in the standard `physim` taskset.
 
 ## Harnesses and validation
 
-Bash is the default harness. Current Verifiers also supplies `prime-agent`,
-Codex, Claude Code, and other harnesses independently of the task.
+Bash is the default harness. Current Verifiers also supplies `prime-agent`, Pi,
+Codex, Claude Code, and other harnesses independently of the task. The prompt
+names laboratory operations and directs the agent to its harness's advertised
+tool names or MCP wrappers.
 See [PRIME_AGENT.md](PRIME_AGENT.md) for Prime Agent configuration.
+
+The `qwen-bash.toml`, `qwen-pi.toml`, and `qwen-prime-agent.toml` configs target
+the hosted Qwen3.5-9B endpoint's 65,536-token context. They reserve 32,768 tokens
+for a response plus 4,096 tokens of tool-result headroom, triggering native
+compaction around 28,672 tokens. Pi and Prime Agent retain 12,000 recent tokens
+when compacting. Context limits belong to the model/provider pairing; verify
+them before adapting these profiles to another endpoint. Total rollout token
+budgets are separate from the per-request context window.
 
 A scripted provider checks the complete experiment, submission, and grading
 path without paid inference. It also checks the agent's package, mount,
@@ -149,6 +172,9 @@ uv run --no-sync python scripts/physim/smoke_runtime.py \
 # Same check on Prime (uses sandbox credits, no paid inference):
 uv run --no-sync python scripts/physim/smoke_runtime.py \
   --runtime prime --output outputs/physim-prime-smoke
+# Exercise finalization's automatic collection instead of an explicit submission:
+uv run --no-sync python scripts/physim/smoke_runtime.py \
+  --runtime docker --completion collect --output outputs/physim-collection-smoke
 ```
 
 The script runs two independent rollouts per world by default (six total).
