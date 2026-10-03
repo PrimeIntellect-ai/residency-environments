@@ -16,6 +16,7 @@ import multiprocessing
 import random
 import re
 import resource
+import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass
@@ -189,14 +190,15 @@ def _rule_check_worker(connection: Connection, target_code: str) -> None:
 class IsolatedRuleChecker:
     """Check untrusted model hypotheses in a resource-limited child process."""
 
-    def __init__(self, target_code: str) -> None:
+    def __init__(self, target_code: str, startup_timeout: float = RULE_CHECK_WALL_SECONDS) -> None:
         self._target_code = target_code
-        self._process: multiprocessing.Process | None = None
+        self._startup_timeout = startup_timeout
+        self._process: subprocess.Popen | None = None
         self._connection: Connection | None = None
         self._start()
 
     def matches(self, guess: str, observations: Sequence[ObservedVerdict] = ()) -> bool:
-        if self._process is None or not self._process.is_alive():
+        if self._process is None or self._process.poll() is not None:
             self._start()
         assert self._connection is not None
         connection = self._connection
@@ -215,43 +217,52 @@ class IsolatedRuleChecker:
         self._connection = None
         self._process = None
         if connection is not None:
-            if process is not None and process.is_alive():
+            if process is not None and process.poll() is None:
                 try:
                     connection.send(None)
                 except (BrokenPipeError, OSError):
                     pass
             connection.close()
         if process is not None:
-            process.join(timeout=1)
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=1)
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
     def _start(self) -> None:
         self.close()
-        context = multiprocessing.get_context("spawn")
-        parent_connection, child_connection = context.Pipe()
-        process = context.Process(
-            target=_rule_check_worker,
-            args=(child_connection, self._target_code),
-            daemon=True,
+        parent_connection, child_connection = multiprocessing.Pipe()
+        # A fresh interpreter avoids re-importing the framework-heavy server entrypoint.
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys; from multiprocessing.connection import Connection; "
+                "from eleusis.rules import _rule_check_worker; "
+                "connection = Connection(int(sys.argv[1])); "
+                "_rule_check_worker(connection, connection.recv())",
+                str(child_connection.fileno()),
+            ],
+            pass_fds=(child_connection.fileno(),),
         )
-        process.start()
         child_connection.close()
-        if not parent_connection.poll(RULE_CHECK_WALL_SECONDS):
-            process.terminate()
-            process.join(timeout=1)
+        parent_connection.send(self._target_code)
+        if not parent_connection.poll(self._startup_timeout):
+            process.kill()
+            process.wait()
             parent_connection.close()
             raise RuntimeError("Rule checker failed to initialize before its deadline.")
         try:
             initialized = parent_connection.recv()
         except EOFError as error:
-            process.join(timeout=1)
+            process.kill()
+            process.wait()
             parent_connection.close()
             raise RuntimeError("Rule checker exited during initialization.") from error
         if not initialized:
-            process.terminate()
-            process.join(timeout=1)
+            process.kill()
+            process.wait()
             parent_connection.close()
             raise ValueError("Target rule failed behavioral signature generation.")
         self._connection = parent_connection
