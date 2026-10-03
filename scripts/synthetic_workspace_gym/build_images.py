@@ -46,11 +46,25 @@ def _resolve_image(inventory: list[dict[str, object]], logical_name: str, tag: s
     for image in inventory:
         if image.get("imageName") != logical_name or image.get("imageTag") != tag:
             continue
-        if image.get("artifactType") != "CONTAINER_IMAGE" or image.get("status") != "COMPLETED":
+        if image.get("status") != "COMPLETED":
             continue
+        runtime_reference = image.get("displayRef")
+        if not isinstance(runtime_reference, str) or not runtime_reference.startswith("prime/"):
+            raise RuntimeError(f"Prime image listing did not expose a runnable public reference: {image}")
         tagged_reference = image.get("fullImagePath")
         if not isinstance(tagged_reference, str):
             raise RuntimeError(f"Prime image listing did not expose a registry reference: {image}")
+        if image.get("artifactType") == "VM_SANDBOX":
+            artifact_id = image.get("id")
+            if not isinstance(artifact_id, str) or not artifact_id:
+                raise RuntimeError(f"Prime image listing did not expose an immutable artifact ID: {image}")
+            return {
+                "runtime": runtime_reference,
+                "prime_artifact_id": artifact_id,
+                "prime_artifact_path": tagged_reference,
+            }
+        if image.get("artifactType") != "CONTAINER_IMAGE":
+            continue
         if "@sha256:" in tagged_reference:
             digest_reference = tagged_reference
         else:
@@ -60,9 +74,6 @@ def _resolve_image(inventory: list[dict[str, object]], logical_name: str, tag: s
                 raise RuntimeError(f"could not resolve an immutable manifest digest for {tagged_reference}")
             repository = tagged_reference.rsplit(":", 1)[0]
             digest_reference = f"{repository}@{match.group(1)}"
-        runtime_reference = image.get("displayRef")
-        if not isinstance(runtime_reference, str) or not runtime_reference.startswith("prime/"):
-            raise RuntimeError(f"Prime image listing did not expose a runnable public reference: {image}")
         return {"runtime": runtime_reference, "container": digest_reference}
     raise KeyError(f"Prime image was not found after push: {logical_name}:{tag}")
 
