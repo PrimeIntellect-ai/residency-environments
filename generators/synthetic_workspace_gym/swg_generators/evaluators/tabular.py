@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -74,15 +71,11 @@ class TabularEvaluator(BaseEvaluator):
         expected = read_json(hidden_root / "expected_output.json")
         execution = 1.0
         if config.get("entrypoint"):
-            completed = subprocess.run(
-                [sys.executable, str(workspace_path / str(config["entrypoint"]))],
-                cwd=str(workspace_path),
-                capture_output=True,
-                text=True,
-                timeout=manifest.time_limit_seconds,
-                env={**dict(os.environ), "PYTHONDONTWRITEBYTECODE": "1"},
-            )
-            execution = float(completed.returncode == 0)
+            precomputed_path = hidden_root / "precomputed_execution.json"
+            if not precomputed_path.is_file():
+                raise ValueError("tabular execution must be collected in the isolated runner runtime")
+            completed = dict(read_json(precomputed_path).get("visible", {}))
+            execution = float(int(completed.get("returncode", 1)) == 0)
             if not execution:
                 return EvaluatorResult(
                     success=False,
@@ -90,9 +83,9 @@ class TabularEvaluator(BaseEvaluator):
                     subscores={"execution": 0.0, "output_exists": 0.0},
                     failure_labels=["execution_failed"],
                     diagnostics={
-                        "stdout": completed.stdout,
-                        "stderr": completed.stderr,
-                        "returncode": completed.returncode,
+                        "stdout": completed.get("stdout", ""),
+                        "stderr": completed.get("stderr", ""),
+                        "returncode": completed.get("returncode", 1),
                     },
                     runtime_seconds=time.perf_counter() - started,
                 )

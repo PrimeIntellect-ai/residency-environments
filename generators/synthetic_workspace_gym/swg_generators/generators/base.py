@@ -23,7 +23,7 @@ from swg_generators.schemas import (
     EnvironmentSpec,
     EvaluatorResult,
 )
-from swg_generators.utils.io import write_json, write_text
+from swg_generators.utils.io import read_json, write_json, write_text
 from swg_generators.utils.paths import list_relative_files
 from swg_generators.utils.scratch import scratch_directory
 
@@ -163,13 +163,19 @@ class BaseGenerator(ABC):
             evaluator_entrypoint=payload.evaluator_entrypoint,
             reference_solution=payload.reference_solution,
         )
-        write_json(root / "manifest.json", manifest.to_dict())
         bundle = GeneratedEnvironment(
             root=root,
             visible_root=visible_root,
             hidden_root=hidden_root,
             manifest=manifest,
         )
+        self.calibrate_initial_score(bundle)
+        manifest.metadata["release_provenance"]["generation_fingerprint"] = generation_fingerprint(
+            visible_root,
+            hidden_root,
+            payload.evaluator_entrypoint,
+        )
+        write_json(root / "manifest.json", manifest.to_dict())
         if validate:
             result = self.validate_instance(bundle)
             bundle.validation_result = result
@@ -178,6 +184,26 @@ class BaseGenerator(ABC):
                     f"Reference solution failed validation for '{manifest.env_id}': {result.failure_labels}"
                 )
         return bundle
+
+    def calibrate_initial_score(self, instance: GeneratedEnvironment) -> None:
+        from swg_generators.evaluators.registry import get_evaluator
+
+        config_path = instance.hidden_root / "evaluator_config.json"
+        config = read_json(config_path)
+        normalization = config.get("score_normalization")
+        if normalization is None:
+            return
+        config.pop("initial_score", None)
+        config.pop("score_normalization", None)
+        write_json(config_path, config)
+        evaluator = get_evaluator(
+            instance.manifest.family,
+            evaluator_entrypoint=instance.manifest.evaluator_entrypoint,
+        )
+        result = evaluator.evaluate(instance.visible_root, instance.manifest, instance.hidden_root)
+        config["initial_score"] = result.score
+        config["score_normalization"] = normalization
+        write_json(config_path, config)
 
     def validate_instance(self, instance: GeneratedEnvironment):
         from swg_generators.evaluators.registry import get_evaluator

@@ -2,14 +2,14 @@
 
 This directory contains the deterministic generation, provenance, and validation library for the Synthetic Workspace Gym taskset. It is deliberately separate from the installable environment package.
 
-The checked-in source curricula live in `configs/synthetic_workspace_gym/`. V2 and V3 remain frozen for provenance; the six V4 curricula and evaluation panels add platform-independent generation and evaluator-identical untouched baselines:
+The checked-in source curricula live in `configs/synthetic_workspace_gym/`. Earlier revisions remain frozen for provenance. The six V5 curricula and evaluation panels calibrate untouched baselines through the shipped execution protocol and harden structure-only and nondeterministic rewards:
 
-- `sft-easy-v4`
-- `sft-validation-v4`
-- `rl-hard-v4`
-- `rl-eval-v4`
-- `eval-d1-d4-paired-panel-48-v4`
-- `eval-d5-family-calibration-40-v4`
+- `sft-easy-v5`
+- `sft-validation-v5`
+- `rl-hard-v5`
+- `rl-eval-v5`
+- `eval-d1-d4-paired-panel-48-v5`
+- `eval-d5-family-calibration-40-v5`
 
 Standalone generation and calibration entrypoints live in `scripts/synthetic_workspace_gym/`. From the repository root, rebuild the curricula with:
 

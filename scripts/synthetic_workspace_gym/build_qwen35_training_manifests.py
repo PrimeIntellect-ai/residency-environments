@@ -9,18 +9,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "configs" / "synthetic_workspace_gym"
 RESIDENCY_MANIFESTS = (
-    "sft-easy-v4",
-    "sft-validation-v4",
-    "rl-hard-v4",
-    "rl-eval-v4",
-    "eval-d1-d4-paired-panel-48-v4",
-    "eval-d5-family-calibration-40-v4",
+    "sft-easy-v5",
+    "sft-validation-v5",
+    "rl-hard-v5",
+    "rl-eval-v5",
+    "eval-d1-d4-paired-panel-48-v5",
+    "eval-d5-family-calibration-40-v5",
 )
 VERSION = "0.2.0.dev1"
 CREATED_AT = "2026-07-27T00:00:00+05:30"
 REBALANCED_CREATED_AT = "2026-08-25T00:00:00+05:30"
 TRAINING_READY_CREATED_AT = "2026-09-11T00:00:00+05:30"
 PORTABLE_RELEASE_CREATED_AT = "2026-09-21T00:00:00+05:30"
+REVIEW_HARDENED_CREATED_AT = "2026-10-03T00:00:00+05:30"
 ORIGINAL = {
     "tabular": [
         "monthly_segment_report",
@@ -659,6 +660,31 @@ def build():
             metadata,
             manifest_version="v4",
             created_at=PORTABLE_RELEASE_CREATED_AT,
+        )
+    v5_sources = {name: name.replace("-v4", "-v5") for name in v4_sources.values()}
+    for source_name, name in v5_sources.items():
+        source = result[source_name]
+        assignments = copy.deepcopy(source["assignments"])
+        for assignment in assignments:
+            assignment["metadata"]["experiment"] = name
+        metadata = {
+            key: copy.deepcopy(value)
+            for key, value in source["metadata"].items()
+            if key not in {"assignment_count", "environment_version", "frozen", "manifest_fingerprint"}
+        }
+        metadata.update(
+            {
+                "supersedes": source_name,
+                "training_readiness_correction": "shipped-evaluator-calibration-and-reward-hardening-v1",
+            }
+        )
+        metadata["disjoint_from"] = [v5_sources.get(item, item) for item in metadata.get("disjoint_from", [])]
+        result[name] = freeze(
+            name,
+            assignments,
+            metadata,
+            manifest_version="v5",
+            created_at=REVIEW_HARDENED_CREATED_AT,
         )
     return result
 

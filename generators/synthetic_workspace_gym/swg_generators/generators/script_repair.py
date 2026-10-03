@@ -2,13 +2,9 @@ from __future__ import annotations
 
 import json
 import random
-import shutil
-import tempfile
 from pathlib import Path
 from textwrap import dedent
-from types import SimpleNamespace
 
-from swg_generators.evaluators.script_repair import ScriptRepairEvaluator
 from swg_generators.generators.base import BaseGenerator, GeneratedPayload
 from swg_generators.generators.common import (
     build_d5_composition_profile,
@@ -251,17 +247,9 @@ if not isinstance(_contract, dict):
             "required_artifact_failure_cap": 0.30,
         }
         write_json(hidden_root / "evaluator_config.json", evaluator_config)
-        with tempfile.TemporaryDirectory(prefix="swg-script-baseline-") as temporary_dir:
-            initial_workspace = Path(temporary_dir) / "workspace"
-            shutil.copytree(visible_root, initial_workspace)
-            initial_result = ScriptRepairEvaluator().evaluate(
-                initial_workspace,
-                SimpleNamespace(time_limit_seconds=spec.time_limit_seconds),
-                hidden_root,
-            )
         evaluator_config.update(
             {
-                "initial_score": initial_result.score,
+                "initial_score": 0.0,
                 "score_normalization": "initial_workspace_progress_v1",
             }
         )

@@ -19,12 +19,12 @@ from swg_generators.secure_protocol import build_protocol
 from swg_generators.utils.paths import list_relative_files
 
 DEFAULT_MANIFESTS = (
-    "sft-easy-v4",
-    "sft-validation-v4",
-    "rl-hard-v4",
-    "rl-eval-v4",
-    "eval-d1-d4-paired-panel-48-v4",
-    "eval-d5-family-calibration-40-v4",
+    "sft-easy-v5",
+    "sft-validation-v5",
+    "rl-hard-v5",
+    "rl-eval-v5",
+    "eval-d1-d4-paired-panel-48-v5",
+    "eval-d5-family-calibration-40-v5",
 )
 FORMAT = "swg-hub-and-images-v1"
 

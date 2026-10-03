@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from swg_generators.evaluators.base import BaseEvaluator
 from swg_generators.evaluators.metrics import (
@@ -110,35 +108,15 @@ class PipelineEvaluator(BaseEvaluator):
     def evaluate(self, workspace_path: Path, manifest: EnvironmentManifest, hidden_root: Path) -> EvaluatorResult:
         started = time.perf_counter()
         config = read_json(hidden_root / "evaluator_config.json")
-        try:
-            completed = subprocess.run(
-                [sys.executable, str(workspace_path / config["entrypoint"])],
-                cwd=str(workspace_path),
-                capture_output=True,
-                text=True,
-                timeout=manifest.time_limit_seconds,
-                env={**dict(os.environ), "PYTHONDONTWRITEBYTECODE": "1"},
-            )
-        except subprocess.TimeoutExpired as exc:
-            return EvaluatorResult(
-                success=False,
-                score=0.0,
-                subscores={
-                    "execution": 0.0,
-                    "valid_json": 0.0,
-                    "row_precision": 0.0,
-                    "row_recall": 0.0,
-                    "row_f1": 0.0,
-                    "exact_match": 0.0,
-                },
-                failure_labels=["timeout"],
-                diagnostics={
-                    "stdout": exc.stdout or "",
-                    "stderr": exc.stderr or "",
-                    "entrypoint": config["entrypoint"],
-                },
-                runtime_seconds=time.perf_counter() - started,
-            )
+        precomputed_path = hidden_root / "precomputed_execution.json"
+        if not precomputed_path.is_file():
+            raise ValueError("pipeline execution must be collected in the isolated runner runtime")
+        run = dict(read_json(precomputed_path).get("visible", {}))
+        completed = SimpleNamespace(
+            returncode=int(run.get("returncode", 1)),
+            stdout=str(run.get("stdout", "")),
+            stderr=str(run.get("stderr", "")),
+        )
         if completed.returncode != 0:
             return EvaluatorResult(
                 success=False,
@@ -210,18 +188,8 @@ class PipelineEvaluator(BaseEvaluator):
             )
 
         expected = read_json(hidden_root / "expected_output.json")
-        first_output = output_path.read_bytes()
-        rerun = subprocess.run(
-            [sys.executable, str(workspace_path / config["entrypoint"])],
-            cwd=str(workspace_path),
-            capture_output=True,
-            text=True,
-            timeout=manifest.time_limit_seconds,
-            env={**dict(os.environ), "PYTHONDONTWRITEBYTECODE": "1"},
-        )
-        deterministic_rerun = float(
-            rerun.returncode == 0 and output_path.exists() and output_path.read_bytes() == first_output
-        )
+        rerun = SimpleNamespace(returncode=int(run.get("rerun_returncode", 1)))
+        deterministic_rerun = float(bool(run.get("deterministic", False)))
         artifact_scores, artifact_failures = self.required_json_artifact_scores(workspace_path, hidden_root, config)
         artifacts_valid = all(score == 1.0 for score in artifact_scores.values())
         success = actual == expected and deterministic_rerun == 1.0 and artifacts_valid
@@ -237,6 +205,8 @@ class PipelineEvaluator(BaseEvaluator):
         raw_score = score
         if config.get("initial_score") is not None:
             score = baseline_normalized_score(raw_score, float(config["initial_score"]))
+        if deterministic_rerun != 1.0:
+            score = 0.0
         if success:
             score = 1.0
         diagnostics = {
@@ -263,7 +233,19 @@ class PipelineEvaluator(BaseEvaluator):
                 **metrics,
                 **{f"capability_{name}": value for name, value in capability_scores.items()},
             },
-            failure_labels=([] if success else list(dict.fromkeys(["output_mismatch", *artifact_failures]))),
+            failure_labels=(
+                []
+                if success
+                else list(
+                    dict.fromkeys(
+                        [
+                            "output_mismatch",
+                            *(("nondeterministic_output",) if deterministic_rerun != 1.0 else ()),
+                            *artifact_failures,
+                        ]
+                    )
+                )
+            ),
             diagnostics=diagnostics,
             runtime_seconds=time.perf_counter() - started,
         )

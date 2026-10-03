@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +106,9 @@ class _ObservationTransformer(ast.NodeTransformer):
 
 _OBSERVATION_SUPPORT = ast.parse(
     """
+import os
+import sys
+
 _SWG_OBSERVATIONS = []
 
 def _swg_normalize(value):
@@ -122,11 +126,60 @@ def _swg_normalize(value):
 
 def _swg_record(name, value):
     _SWG_OBSERVATIONS.append({"name": name, "value": _swg_normalize(value)})
+
+def _swg_emit(value):
+    payload = json.dumps(_swg_normalize(value), sort_keys=True).encode("utf-8")
+    frame = bytes.fromhex(os.environ["SWG_OBSERVATION_FRAME"])
+    sys.stdout.buffer.write(frame + len(payload).to_bytes(8, "big") + payload)
+    sys.stdout.buffer.flush()
 """
 ).body
 
 
 def observation_probe(source: str) -> str:
+    child_source = _instrumented_observation_probe(source)
+    return (
+        textwrap.dedent(
+            f"""
+            import os
+            import secrets
+            import subprocess
+            import sys
+            from pathlib import Path
+
+            child_source = {child_source!r}
+            frame = secrets.token_bytes(32)
+            environment = {{**dict(os.environ), "SWG_OBSERVATION_FRAME": frame.hex()}}
+            child_path = Path(__file__).with_name(f".swg-probe-{{secrets.token_hex(16)}}.py")
+            child_path.write_text(child_source, encoding="utf-8")
+            try:
+                child = subprocess.run(
+                    [sys.executable, str(child_path), sys.argv[1]],
+                    cwd=str(Path(__file__).resolve().parent),
+                    capture_output=True,
+                    env=environment,
+                )
+            finally:
+                child_path.unlink(missing_ok=True)
+            offset = child.stdout.find(frame)
+            if child.returncode != 0 or offset < 0:
+                sys.stderr.buffer.write(child.stderr or child.stdout or b"observation probe failed")
+                raise SystemExit(child.returncode or 1)
+            framed = child.stdout[offset + len(frame) :]
+            if len(framed) < 8:
+                raise SystemExit("observation probe returned a truncated header")
+            size = int.from_bytes(framed[:8], "big")
+            payload = framed[8 : 8 + size]
+            if len(payload) != size:
+                raise SystemExit("observation probe returned a truncated payload")
+            Path(sys.argv[2]).write_bytes(payload)
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def _instrumented_observation_probe(source: str) -> str:
     tree = ast.parse(source)
     tree = _ObservationTransformer().visit(tree)
     assert isinstance(tree, ast.Module)
@@ -142,7 +195,7 @@ def observation_probe(source: str) -> str:
 workspace = Path(sys.argv[1]).resolve()
 suite = build_suite(workspace)
 unittest.TextTestRunner(verbosity=0).run(suite)
-Path(sys.argv[2]).write_text(json.dumps(_SWG_OBSERVATIONS, sort_keys=True), encoding="utf-8")
+_swg_emit(_SWG_OBSERVATIONS)
 """
             ).body
         elif isinstance(node, ast.FunctionDef) and node.name == "main":
@@ -197,9 +250,7 @@ def _project_expression(node: ast.expr) -> ast.expr:
 
 
 def _write_observations_statement(expression: str) -> list[ast.stmt]:
-    return ast.parse(
-        f'Path(sys.argv[2]).write_text(json.dumps(_swg_normalize({expression}), sort_keys=True), encoding="utf-8")'
-    ).body
+    return ast.parse(f"_swg_emit({expression})").body
 
 
 def _rewrite_capability_runner(node: ast.FunctionDef) -> None:

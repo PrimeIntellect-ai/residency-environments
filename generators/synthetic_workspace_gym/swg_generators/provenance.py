@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 ENVIRONMENT_VERSION = "0.1.0"
-EVALUATOR_VERSION = "swg-capability-evaluators-v3"
+EVALUATOR_VERSION = "swg-capability-evaluators-v4"
 
 
 def generation_fingerprint(

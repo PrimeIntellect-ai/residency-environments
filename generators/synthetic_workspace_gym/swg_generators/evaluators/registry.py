@@ -3,6 +3,7 @@ from __future__ import annotations
 from importlib import import_module
 
 from swg_generators.evaluators.base import BaseEvaluator
+from swg_generators.local_protocol import evaluate_with_shipped_protocol
 from swg_generators.schemas import EnvironmentFamily
 
 from .composite_workspace import CompositeWorkspaceEvaluator
@@ -22,8 +23,10 @@ EVALUATORS = {
 
 def get_evaluator(family: EnvironmentFamily | str, evaluator_entrypoint: str | None = None):
     if evaluator_entrypoint:
-        return load_evaluator_from_entrypoint(evaluator_entrypoint)
-    return D5CalibratedEvaluator(EVALUATORS[EnvironmentFamily(family)])
+        evaluator = load_evaluator_from_entrypoint(evaluator_entrypoint)
+    else:
+        evaluator = EVALUATORS[EnvironmentFamily(family)]
+    return D5CalibratedEvaluator(ShippedProtocolEvaluator(evaluator))
 
 
 def list_evaluators() -> list[str]:
@@ -37,11 +40,19 @@ def load_evaluator_from_entrypoint(entrypoint: str) -> BaseEvaluator:
     module = import_module(module_name)
     loaded = getattr(module, attr_name)
     if isinstance(loaded, BaseEvaluator):
-        return D5CalibratedEvaluator(loaded)
+        return loaded
     instance = loaded()
     if not isinstance(instance, BaseEvaluator):
         raise TypeError(f"Evaluator entrypoint did not resolve to a BaseEvaluator: {entrypoint}")
-    return D5CalibratedEvaluator(instance)
+    return instance
+
+
+class ShippedProtocolEvaluator(BaseEvaluator):
+    def __init__(self, evaluator: BaseEvaluator) -> None:
+        self.evaluator = evaluator
+
+    def evaluate(self, workspace_path, manifest, hidden_root):
+        return evaluate_with_shipped_protocol(self.evaluator, workspace_path, manifest, hidden_root)
 
 
 class D5CalibratedEvaluator(BaseEvaluator):

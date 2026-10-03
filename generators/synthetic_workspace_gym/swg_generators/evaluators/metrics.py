@@ -40,6 +40,8 @@ def weighted_match_score(*, output_exists: float, valid_structure: float, metric
         + 0.2 * metrics["row_recall"]
         + 0.1 * metrics["exact_match"]
     )
+    if metrics["row_precision"] == 0.0 and metrics["row_recall"] == 0.0:
+        score = min(score, 0.2)
     return round(min(1.0, max(0.0, score)), 6)
 
 

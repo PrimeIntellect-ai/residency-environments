@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import json
 import random
-import shutil
-import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 
-from swg_generators.evaluators.registry import get_evaluator
 from swg_generators.generators.base import BaseGenerator, GeneratedPayload
 from swg_generators.generators.common import (
     build_d5_composition_profile,
@@ -87,23 +83,9 @@ class TabularTransformationGenerator(BaseGenerator):
                 "swg_generators.evaluators.tabular:TabularEvaluator",
             )
         )
-        with tempfile.TemporaryDirectory(prefix="swg-tabular-baseline-") as temporary_dir:
-            initial_workspace = Path(temporary_dir) / "workspace"
-            shutil.copytree(visible_root, initial_workspace)
-            initial_result = get_evaluator(
-                self.family,
-                evaluator_entrypoint=evaluator_entrypoint,
-            ).evaluate(
-                initial_workspace,
-                SimpleNamespace(
-                    time_limit_seconds=spec.time_limit_seconds,
-                    metadata={"difficulty_realization": {"level": spec.difficulty}},
-                ),
-                hidden_root,
-            )
         evaluator_config.update(
             {
-                "initial_score": initial_result.score,
+                "initial_score": 0.0,
                 "score_normalization": "initial_workspace_progress_v1",
             }
         )
