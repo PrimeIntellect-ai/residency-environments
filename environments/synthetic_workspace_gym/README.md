@@ -8,7 +8,7 @@ Synthetic Workspace Gym (SWG) is a native Verifiers V1 taskset for training term
 
 The task declares `NEEDS_CONTAINER = True` and a working directory of `/workspace`. Verifiers and the selected standard harness own model interaction, terminal access, runtime provisioning, rollout timeouts, and trace capture. SWG does not wrap a harness or implement a rollout loop; it adds a shorter timeout only around candidate programs executed during trusted finalization.
 
-Visible workspaces are baked into six digest-pinned images, one per curriculum or evaluation panel. Setup selects one workspace and removes the rest of the split payload before the agent starts. Hidden assets never enter the agent runtime or task state.
+Visible workspaces are baked into six immutable Prime VM artifacts, one per curriculum or evaluation panel. Each pin records the public runtime tag together with Prime's artifact ID and CAS path. Setup selects one workspace and removes the rest of the split payload before the agent starts. Hidden assets never enter the agent runtime or task state.
 
 Finalization uses three trust domains:
 
@@ -40,7 +40,7 @@ Run the required small integration smoke with the standard harness/runtime:
 uv run eval --taskset.id synthetic-workspace-gym -n 1 -r 2 --max-turns 4
 ```
 
-Use the default `sft-easy-v4` mid-training manifest or select another immutable dataset manifest and filters:
+Use the default `sft-easy-v5` mid-training manifest or select another immutable dataset manifest and filters:
 
 ```bash
 uv run eval --taskset.id synthetic-workspace-gym \
@@ -50,15 +50,15 @@ uv run eval --taskset.id synthetic-workspace-gym \
   -n 20 -r 3 --rich false --no-push
 ```
 
-The purpose-specific manifests are `sft-easy-v4` (family-calibrated D1-D3 teacher traces), `sft-validation-v4` (scenario- and seed-held-out D1-D3), `rl-hard-v4` (family-calibrated D4-D5 atomic and composite training), and `rl-eval-v4` (family-stratified held-out D4-D5 scenarios, seeds, fixtures, and compositions). V4 records the exact generator commit, uses platform-independent task bytes, and measures untouched pipeline baselines through the same evaluator paths used at grading time. Verifiers' normal `-n`, `-r`, `--shuffle`, harness, model, sampling, and runtime options apply without environment-specific rollout arguments.
+The purpose-specific manifests are `sft-easy-v5` (family-calibrated D1-D3 teacher traces), `sft-validation-v5` (scenario- and seed-held-out D1-D3), `rl-hard-v5` (family-calibrated D4-D5 atomic and composite training), and `rl-eval-v5` (family-stratified held-out D4-D5 scenarios, seeds, fixtures, and compositions). V5 records the exact public generator commit, calibrates untouched rewards through the shipped execution protocol, requires deterministic command outputs for reward, and transports observations through a trusted post-process frame. Verifiers' normal `-n`, `-r`, `--shuffle`, harness, model, sampling, and runtime options apply without environment-specific rollout arguments.
 
-For difficulty calibration, use `eval-d1-d4-paired-panel-48-v3` and `eval-d5-family-calibration-40-v3`. The first holds family, scenario, and seed fixed while difficulty changes; the second reports D5 separately by family and retrieval profile.
+For difficulty calibration, use `eval-d1-d4-paired-panel-48-v5` and `eval-d5-family-calibration-40-v5`. The first holds family, scenario, and seed fixed while difficulty changes; the second reports D5 separately by family and retrieval profile.
 
 ## Configuration
 
 | Field                                      | Default       | Purpose                                                        |
 | ------------------------------------------ | ------------- | -------------------------------------------------------------- |
-| `manifest`                                 | `sft-easy-v4` | Immutable curriculum or evaluation panel                       |
+| `manifest`                                 | `sft-easy-v5` | Immutable curriculum or evaluation panel                       |
 | `families`                                 | all           | Optional family filter                                         |
 | `difficulties`                             | all           | Optional difficulty filter (`1` through `5`)                   |
 | `tasks`                                    | all           | Optional exact task-ID filter                                  |

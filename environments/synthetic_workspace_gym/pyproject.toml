@@ -1,13 +1,13 @@
 [project]
 name = "synthetic-workspace-gym"
-version = "0.2.1"
+version = "0.2.2"
 description = "Native Verifiers V1 workspace tasks for training terminal agents."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [{ name = "Yadnyesh Chakane" }]
 tags = ["multi-turn", "tool-use", "workspace", "code", "v1"]
-dependencies = ["huggingface-hub>=0.28,<2", "verifiers>=0.3.0"]
+dependencies = ["huggingface-hub>=0.28,<2", "verifiers>=0.3.1,<0.4"]
 
 [build-system]
 requires = ["hatchling"]

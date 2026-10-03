@@ -7,7 +7,7 @@ import json
 import posixpath
 import textwrap
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.resources import files
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
@@ -25,7 +25,7 @@ Family = Literal[
     "composite_workspace",
 ]
 
-DEFAULT_MANIFEST = "sft-easy-v4"
+DEFAULT_MANIFEST = "sft-easy-v5"
 WORKDIR = "/workspace"
 EXECUTION_ROOT = "/opt/swg-exec"
 GRADER_EXECUTION_ROOT = "/opt/swg-grade/execution"
@@ -306,6 +306,23 @@ class SyntheticWorkspaceTask(
         solution_files = dict(task_blob["manifest"].get("reference_solution", {}).get("files", {}))
         for relative_path, content in solution_files.items():
             await runtime.write(_safe_path(WORKDIR, relative_path), str(content).encode())
+
+    async def validate(self, runtime: vf.Runtime) -> bool:
+        await self.apply_gold_solution(runtime)
+        trace = _ValidationTrace(
+            id=f"validate-{self.data.name or 'swg-task'}",
+            state=SyntheticWorkspaceState(),
+        )
+        await self.finalize(trace, runtime)  # type: ignore[arg-type]
+        reward = await self.workspace_score(trace)  # type: ignore[arg-type]
+        return bool(trace.state.evaluator_result.get("success")) and reward == 1.0
+
+
+@dataclass
+class _ValidationTrace:
+    id: str
+    state: SyntheticWorkspaceState
+    info: dict[str, Any] = field(default_factory=dict)
 
 
 class SyntheticWorkspaceTaskset(vf.Taskset[SyntheticWorkspaceTask, SyntheticWorkspaceTasksetConfig]):
@@ -720,10 +737,15 @@ def _require_digest_pin(image: str, label: str) -> None:
 
 def _runtime_image(artifact: object, label: str) -> str:
     if not isinstance(artifact, dict):
-        raise ValueError(f"{label} must declare runtime and container references")
+        raise ValueError(f"{label} must declare a runtime reference and immutable artifact identity")
     runtime = str(artifact.get("runtime", ""))
     container = str(artifact.get("container", ""))
-    _require_digest_pin(container, f"{label} container")
+    artifact_id = str(artifact.get("prime_artifact_id", ""))
+    artifact_path = str(artifact.get("prime_artifact_path", ""))
+    if container:
+        _require_digest_pin(container, f"{label} container")
+    elif not artifact_id or not artifact_path.endswith("/rootfs-cas"):
+        raise ValueError(f"{label} must declare a Prime artifact ID and CAS path")
     if not runtime.startswith("prime/") or ":" not in runtime.rpartition("/")[2]:
         raise ValueError(f"{label} runtime must be a versioned public Prime image reference")
     return runtime

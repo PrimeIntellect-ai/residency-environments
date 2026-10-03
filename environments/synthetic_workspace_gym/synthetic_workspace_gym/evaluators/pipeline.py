@@ -205,6 +205,8 @@ class PipelineEvaluator(BaseEvaluator):
         raw_score = score
         if config.get("initial_score") is not None:
             score = baseline_normalized_score(raw_score, float(config["initial_score"]))
+        if deterministic_rerun != 1.0:
+            score = 0.0
         if success:
             score = 1.0
         diagnostics = {
@@ -231,7 +233,19 @@ class PipelineEvaluator(BaseEvaluator):
                 **metrics,
                 **{f"capability_{name}": value for name, value in capability_scores.items()},
             },
-            failure_labels=([] if success else list(dict.fromkeys(["output_mismatch", *artifact_failures]))),
+            failure_labels=(
+                []
+                if success
+                else list(
+                    dict.fromkeys(
+                        [
+                            "output_mismatch",
+                            *(("nondeterministic_output",) if deterministic_rerun != 1.0 else ()),
+                            *artifact_failures,
+                        ]
+                    )
+                )
+            ),
             diagnostics=diagnostics,
             runtime_seconds=time.perf_counter() - started,
         )

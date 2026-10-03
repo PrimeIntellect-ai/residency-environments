@@ -1,36 +1,43 @@
 {
   "dataset_repo": "ydnysh/synthetic-workspace-gym",
-  "dataset_revision": "90893216b0cf7a2f46a077ab44ab9d404c06a686",
-  "generator_revision": "533c4d345a6a17ba22eea8a68ffdc2f62c3bc0a2",
-  "artifact_integrity_sha256": "2eb246b24fbbd905e763afa48428e833744748d827e2c5d7fc02cf41194c8c27",
+  "dataset_revision": "3ba83f647b96556be8c5084584a2d86e93225684",
+  "generator_revision": "3bd13bb949846e7b7393afe81727f1127e984475",
+  "artifact_integrity_sha256": "128c3c984d91e7d46918e0f2f77cab4543943a25e11083bf18d0ad00dcf9f7f8",
   "images": {
-    "eval-d1-d4-paired-panel-48-v4": {
-      "runtime": "prime/yadnyesh/synthetic-workspace-gym-eval-d1-d4-paired-panel-48-v4:v4-2eb246b2",
-      "container": "cmee2dees0002x3lw5g0cbf8p/synthetic-workspace-gym-eval-d1-d4-paired-panel-48-v4@sha256:dcf86a3ca713ac26fc2c2abf4981e03e3fa9097eeca5f0b55499415df7d49a97"
+    "eval-d1-d4-paired-panel-48-v5": {
+      "prime_artifact_id": "objopl5cxo35njpwui2c81l0",
+      "prime_artifact_path": "cmee2dees0002x3lw5g0cbf8p/y9eqm22g31pgjf78oqr8hd9c/linux-amd64/rootfs-cas",
+      "runtime": "prime/yadnyesh/synthetic-workspace-gym-eval-d1-d4-paired-panel-48-v5:v5-128c3c98"
     },
-    "eval-d5-family-calibration-40-v4": {
-      "runtime": "prime/yadnyesh/synthetic-workspace-gym-eval-d5-family-calibration-40-v4:v4-2eb246b2",
-      "container": "cmee2dees0002x3lw5g0cbf8p/synthetic-workspace-gym-eval-d5-family-calibration-40-v4@sha256:4a1d1edca62098d694d1783488defa937eb8dd6e241341c38920a183024ea2aa"
+    "eval-d5-family-calibration-40-v5": {
+      "prime_artifact_id": "ob985zt0e9wgma8yl7k4o2d6",
+      "prime_artifact_path": "cmee2dees0002x3lw5g0cbf8p/bm3csqsxl0qemvi65gux53no/linux-amd64/rootfs-cas",
+      "runtime": "prime/yadnyesh/synthetic-workspace-gym-eval-d5-family-calibration-40-v5:v5-128c3c98"
     },
     "grader": {
-      "runtime": "prime/yadnyesh/synthetic-workspace-gym-grader:v4-2eb246b2",
-      "container": "cmee2dees0002x3lw5g0cbf8p/synthetic-workspace-gym-grader@sha256:60f131885799072b6c1fa36534bc7a33696620caa759392dd182ac5d282748d4"
+      "prime_artifact_id": "zws7hg0o30b3r6429mw3on0b",
+      "prime_artifact_path": "cmee2dees0002x3lw5g0cbf8p/bj7qh2sruhulqvoq8eak6uc3/linux-amd64/rootfs-cas",
+      "runtime": "prime/yadnyesh/synthetic-workspace-gym-grader:v5-128c3c98"
     },
-    "rl-eval-v4": {
-      "runtime": "prime/yadnyesh/synthetic-workspace-gym-rl-eval-v4:v4-2eb246b2",
-      "container": "cmee2dees0002x3lw5g0cbf8p/synthetic-workspace-gym-rl-eval-v4@sha256:a297f0b462a94bb98375c8926a682d0d8142e14592b1d3782218a7e15b6ebe37"
+    "rl-eval-v5": {
+      "prime_artifact_id": "lo7gtb8kwssur90juv827c1t",
+      "prime_artifact_path": "cmee2dees0002x3lw5g0cbf8p/ct9aitaw6ws9ysej62cpt5fm/linux-amd64/rootfs-cas",
+      "runtime": "prime/yadnyesh/synthetic-workspace-gym-rl-eval-v5:v5-128c3c98"
     },
-    "rl-hard-v4": {
-      "runtime": "prime/yadnyesh/synthetic-workspace-gym-rl-hard-v4:v4-2eb246b2",
-      "container": "cmee2dees0002x3lw5g0cbf8p/synthetic-workspace-gym-rl-hard-v4@sha256:bb5d996631237fe8164f6c529158e27e399fd390309d40271216a442033d01ff"
+    "rl-hard-v5": {
+      "prime_artifact_id": "vpjq1d8o9e8yanrdv4s0g877",
+      "prime_artifact_path": "cmee2dees0002x3lw5g0cbf8p/bi3n9fts4fpo9flqfpqlh5oz/linux-amd64/rootfs-cas",
+      "runtime": "prime/yadnyesh/synthetic-workspace-gym-rl-hard-v5:v5-128c3c98"
     },
-    "sft-easy-v4": {
-      "runtime": "prime/yadnyesh/synthetic-workspace-gym-sft-easy-v4:v4-2eb246b2",
-      "container": "cmee2dees0002x3lw5g0cbf8p/synthetic-workspace-gym-sft-easy-v4@sha256:1ccada8a717ae8663dcdc6cba91c902a4c111d94b14897d314692579d0b171b1"
+    "sft-easy-v5": {
+      "prime_artifact_id": "i3upbkdq7eqbqae0pp8pl1qk",
+      "prime_artifact_path": "cmee2dees0002x3lw5g0cbf8p/od75fuujjdl5kpsl0uwb88k8/linux-amd64/rootfs-cas",
+      "runtime": "prime/yadnyesh/synthetic-workspace-gym-sft-easy-v5:v5-128c3c98"
     },
-    "sft-validation-v4": {
-      "runtime": "prime/yadnyesh/synthetic-workspace-gym-sft-validation-v4:v4-2eb246b2",
-      "container": "cmee2dees0002x3lw5g0cbf8p/synthetic-workspace-gym-sft-validation-v4@sha256:7eeb9dabe9b32e85a1f88da92859fe3e7ef098f9c7b03ca44ce6ef7824707378"
+    "sft-validation-v5": {
+      "prime_artifact_id": "dxn6sxwuocuaar0k5thud9jw",
+      "prime_artifact_path": "cmee2dees0002x3lw5g0cbf8p/esuz0w5sjnj4zmcj5uafe2wm/linux-amd64/rootfs-cas",
+      "runtime": "prime/yadnyesh/synthetic-workspace-gym-sft-validation-v5:v5-128c3c98"
     }
   }
 }
