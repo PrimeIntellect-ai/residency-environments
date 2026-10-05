@@ -25,7 +25,7 @@ Unsolved episodes receive zero.
 
 ## Run
 
-Eleusis pins Verifiers to commit `37e459a`. The default remains one agent using the standard chat/tool program. Version 0.8.0 adds configurable teams and updates the SDK; older calibration results retain their original version provenance.
+Eleusis requires `verifiers>=0.3.2.dev162,<0.4`. The default remains one agent using the standard chat/tool program. Version 0.8.0 adds configurable teams and updates the SDK; older calibration results retain their original version provenance.
 
 ```bash
 uv run vf-eval eleusis -m <model>
