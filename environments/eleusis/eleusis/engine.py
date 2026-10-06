@@ -42,6 +42,7 @@ class EleusisState(vf.State):
     invalid_actions: int = 0
     observations: list[tuple[str, list[str], bool]] = []
     turn_log: list[dict] = []
+    outbox: list[str] = []
 
 
 def deal(
