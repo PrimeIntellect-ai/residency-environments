@@ -1,0 +1,40 @@
+model = "openai/gpt-5.6-sol"
+num_tasks = 1
+num_rollouts = 1
+max_concurrent = 1
+push = false
+output_dir = "outputs/isolated-validation"
+
+[env.timeout]
+episode = 300
+finalize = 120
+
+[env.taskset]
+id = "alphaverse"
+num_tasks = 1
+seed = 7
+scenario_version = "mvp-v1"
+max_market_time_ns = 5000000000
+prompt = "This is a short deployment and artifact integration test, not a trading benchmark. Read the strategy interface in API.md if needed. Deploy a one-shot StrategyImpl that submits a BUY limit at 11000 for one contract in on_start. Advance market time by 1000000 ns, and inspect the account. Then deploy a revised one-shot StrategyImpl that submits a SELL limit at 9000 for one contract in on_start, advance by 1000000 ns, inspect the account, and call terminate_session. Do not spend time optimizing a strategy. Use the tool argument names from their schemas. The market begins after a warmup; the horizon is absolute, so finish via terminate_session rather than a long wait."
+
+[env.taskset.task]
+time_mode = "manual"
+
+[env.taskset.task.toolset]
+artifact_transport = "stream"
+
+[env.taskset.task.toolset.strategy_runtime]
+type = "prime"
+allow = []
+cpu = 1
+memory = 1
+
+[env.agent]
+max_turns = 16
+
+[env.agent.runtime]
+type = "prime"
+allow = []
+
+[run]
+name = "isolated-prime-mechanics"

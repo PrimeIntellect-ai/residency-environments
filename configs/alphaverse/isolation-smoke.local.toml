@@ -1,0 +1,63 @@
+model = "openai/gpt-5.6-sol"
+num_tasks = 1
+num_rollouts = 1
+max_concurrent = 1
+push = false
+output_dir = "outputs/isolated-validation"
+
+[env]
+id = "alphaverse_adaptive_env"
+max_concurrent_agents = 2
+max_open_segments_per_session = 2
+prop_mode = "adaptive"
+prop_framing = "arbitrary"
+
+[env.timeout]
+episode = 1800
+finalize = 300
+
+[env.taskset]
+id = "alphaverse"
+num_tasks = 1
+seed = 7
+scenario_version = "endogenous-mixed-v1"
+max_market_time_ns = 20000000000
+prompt = "This is a mechanics integration test, not a performance benchmark. Read README.md and API.md. Deploy a simple automated strategy, let it trade during the first session, inspect its behavior, and stage a revision during the intermission. Then let it run to the final market-time horizon. Check strategy status after deployment and account status after trading. Follow the documented session-boundary instructions."
+
+[env.taskset.task]
+time_mode = "manual"
+session_duration_ns = 10000000000
+
+[env.taskset.task.toolset]
+artifact_transport = "stream"
+
+[env.taskset.task.toolset.strategy_runtime]
+type = "docker"
+allow = []
+
+[env.player]
+max_turns = 48
+
+[env.player.harness]
+id = "alphaverse_codex_harness"
+version = "0.144.5"
+multi_agent = false
+
+[env.player.runtime]
+type = "docker"
+allow = []
+
+[env.prop]
+max_turns = 32
+
+[env.prop.harness]
+id = "alphaverse_codex_harness"
+version = "0.144.5"
+multi_agent = false
+
+[env.prop.runtime]
+type = "docker"
+allow = []
+
+[run]
+name = "isolated-adaptive-mechanics"

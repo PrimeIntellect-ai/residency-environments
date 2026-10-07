@@ -1,0 +1,39 @@
+# Install scripts/alphaverse/clock_probe before running. No inference is used.
+# Deliberately omit time_mode to exercise the environment default.
+model = "openai/gpt-5.6-sol"
+num_tasks = 1
+num_rollouts = 2
+max_concurrent = 2
+push = false
+output_dir = "/tmp/alphaverse-clock-evals"
+
+[env.timeout]
+episode = 180
+finalize = 120
+
+[env.taskset]
+id = "alphaverse"
+seed = 7
+max_market_time_ns = 20000000000
+
+[env.taskset.task.toolset]
+artifact_transport = "stream"
+
+[env.taskset.task.toolset.strategy_runtime]
+type = "docker"
+allow = []
+cpu = 1
+memory = 1
+
+[env.agent.harness]
+id = "alphaverse_clock_probe"
+delay_seconds = 0.0
+
+[env.agent.runtime]
+type = "docker"
+allow = []
+cpu = 1
+memory = 2
+
+[run]
+name = "clock-fast"

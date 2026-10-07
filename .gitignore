@@ -1,5 +1,6 @@
 .DS_Store
 outputs
+.alphaverse/
 
 # Runtime "in use" lock markers created next to materialized env checkouts
 # by the git-checkout cache during evals.

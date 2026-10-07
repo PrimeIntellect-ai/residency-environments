@@ -1,0 +1,41 @@
+# Paid inference with local Docker research/trading runtimes.
+# Uses the normal task prompt, not a scripted terminate instruction.
+model = "openai/gpt-4.1-mini"
+num_tasks = 1
+num_rollouts = 2
+max_concurrent = 2
+push = false
+output_dir = "/tmp/alphaverse-natural-evals"
+
+# Validation safety watchdog; hitting this is a failed run, not a scored limit.
+[env.timeout]
+episode = 900
+finalize = 180
+
+[env.taskset]
+id = "alphaverse"
+seed = 7
+max_market_time_ns = "None"
+model_turn_cap = "None"
+
+[env.taskset.task.toolset]
+artifact_transport = "stream"
+
+[env.taskset.task.toolset.strategy_runtime]
+type = "docker"
+allow = []
+cpu = 1
+memory = 1
+
+[env.agent.harness]
+id = "alphaverse"
+tool_timeout = 180
+
+[env.agent.runtime]
+type = "docker"
+allow = []
+cpu = 1
+memory = 2
+
+[run]
+name = "natural-completion"

@@ -1,0 +1,39 @@
+# No inference: requires scripts/alphaverse/clock_probe.
+model = "openai/gpt-4.1-mini"
+num_tasks = 1
+num_rollouts = 2
+max_concurrent = 2
+push = false
+output_dir = "/tmp/alphaverse-bounded-evals"
+
+[env.timeout]
+episode = 180
+finalize = 120
+
+[env.taskset]
+id = "alphaverse"
+seed = 7
+max_market_time_ns = 20000000000
+
+[env.taskset.task.toolset]
+artifact_transport = "stream"
+wait_slice_seconds = 0.02
+
+[env.taskset.task.toolset.strategy_runtime]
+type = "docker"
+allow = []
+cpu = 1
+memory = 1
+
+[env.agent.harness]
+id = "alphaverse_clock_probe"
+require_yield = true
+
+[env.agent.runtime]
+type = "docker"
+allow = []
+cpu = 1
+memory = 2
+
+[run]
+name = "bounded-tools"
