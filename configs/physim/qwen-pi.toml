@@ -1,0 +1,53 @@
+# Hosted Qwen with a 65,536-token context: reserve output and tool-result headroom.
+# Evaluate all preparations in the pinned catalog; -r repeats each world equally.
+model = "Qwen/Qwen3.5-9B"
+num_rollouts = 1
+max_concurrent = 1
+push = false
+
+[env.taskset]
+id = "physim"
+
+[sampling]
+max_tokens = 32768
+
+[env.taskset.task]
+output_root = "outputs/r6/artifacts"
+agent_image = "python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93"
+
+[env.taskset.task.tools]
+# bundle = "/path/to/bundle" # Optional single-preparation override.
+max_experiments = 1000
+max_total_tu = 50000
+max_validation_attempts = 128
+max_submission_attempts = 128
+
+[env.agent]
+# Generous exploration defaults; increase these together for longer investigations.
+max_turns = 1024
+max_output_tokens = 1048576
+
+[env.agent.timeout]
+rollout = 86400
+
+[env.agent.harness]
+id = "pi"
+context_window = 65536
+
+[env.agent.harness.compaction]
+reserve_tokens = 36864
+keep_recent_tokens = 12000
+
+[env.agent.runtime]
+type = "prime"
+image = "python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93"
+workdir = "/workspace"
+cpu = 4
+memory = 8
+allow = []
+
+[env.agent.retries]
+max_retries = 0
+
+[env.retries]
+max_retries = 0
