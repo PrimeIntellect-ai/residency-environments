@@ -7,11 +7,11 @@ import asyncio
 import verifiers.v1 as vf
 
 from .engine import EleusisState, init_state, play_turn
-from .rules import IsolatedRuleChecker, compile_python_rule
+from .rules import RULE_CHECK_WALL_SECONDS, IsolatedRuleChecker, compile_python_rule
 
 
 class EleusisToolsetConfig(vf.ToolsetConfig):
-    pass
+    colocated: bool = True
 
 
 class EleusisToolset(vf.Toolset[EleusisToolsetConfig, EleusisState]):
@@ -20,7 +20,9 @@ class EleusisToolset(vf.Toolset[EleusisToolsetConfig, EleusisState]):
     async def setup_task(self, task) -> None:
         self._task = task
         self._target = compile_python_rule(task.rule_code)
-        self._rule_checker = IsolatedRuleChecker(task.rule_code)
+        self._rule_checker = IsolatedRuleChecker(
+            task.rule_code, startup_timeout=60 if task.num_agents > 1 else RULE_CHECK_WALL_SECONDS
+        )
         self._exit_stack.callback(self._rule_checker.close)
 
     @vf.tool

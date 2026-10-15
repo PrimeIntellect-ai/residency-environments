@@ -1,0 +1,14 @@
+# Run: uv run vf-eval eleusis @ configs/eleusis/cooperative.toml -m <model>
+num_rollouts = 2
+max_concurrent = 1
+
+[select]
+limit = 1
+
+[env]
+num_agents = 3
+max_calls_per_agent = 160
+deadline_seconds = 1200
+
+[env.agent.runtime]
+type = "docker"
