@@ -1,0 +1,22 @@
+[project]
+name = "midog-mitosis"
+version = "0.9.1"
+description = "midog-mitosis: a hard, binary-verifiable mitotic-figure benchmark and RL environment (Verifiers v1 taskset) built on MIDOG++ (CC0)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "datasets>=4.0",
+    "verifiers>=0.3.1,<0.4",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["midog_mitosis"]
+
+[tool.verifiers.eval]
+num_examples = 100
+rollouts_per_example = 5

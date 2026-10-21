@@ -1,0 +1,39 @@
+# Pi, an open coding harness, runs any model. The reported evaluation runs every model here at `high` reasoning effort,
+# so all models get the same tools and instructions: the 100 benchmark tasks, five attempts each, with model requests
+# sent through the image relay, which re-encodes their images as JPEG for the provider's image cap:
+#   uv run scripts/midog-mitosis/jpeg_proxy.py &
+#   uv run eval @ configs/midog-mitosis/pi.toml -m anthropic/claude-opus-5.5 --sampling.reasoning-effort high -n 100 -r 5 \
+#     --client.base-url http://127.0.0.1:8899/api/v1
+# Qwen models take no reasoning effort. The runtime egress policy is the same as in claude_code.toml. An attempt that
+# still hits the image cap counts as failed (scripts/midog-mitosis/report.py).
+# The longer rollout timeout allows long reasoning/tool trajectories under the same 150-turn limit.
+num_rollouts = 3
+max_concurrent = 8
+push = false
+
+[sampling]
+max_tokens = 64000
+
+[env.taskset]
+id = "midog-mitosis"
+
+[env.agent]
+max_turns = 150
+
+[env.agent.harness]
+id = "pi"
+version = "0.84.1"
+
+# Pi keeps every image the agent reads in its context. An agent that reads many large crops (DeepSeek V4.1 Flash) froze
+# the default 2 GB sandbox, which Prime then terminated without a reason; 8 GB leaves room. One CPU, as before.
+[env.agent.runtime]
+type = "prime"
+memory = 8.0
+
+[env.agent.timeout]
+rollout = 14400
+
+# Rerun an attempt in a fresh sandbox when a provider call, the sandbox or the harness fails (never on reward).
+[env.agent.retries]
+max_retries = 2
+include = ["ProviderError", "SandboxError", "HarnessError"]

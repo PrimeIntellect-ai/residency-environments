@@ -1,0 +1,32 @@
+# OpenAI models in Codex, their own harness. The reported evaluation runs every model in Pi instead (pi.toml).
+#   uv run eval @ configs/midog-mitosis/codex.toml -m openai/gpt-6-luna -n 100
+# Same runtime egress policy as claude_code.toml; see the environment README for the DNS caveat.
+# Default concurrency is 4.
+num_rollouts = 3
+max_concurrent = 4
+push = false
+
+[sampling]
+max_tokens = 64000
+reasoning_effort = "xhigh"
+
+[env.taskset]
+id = "midog-mitosis"
+
+[env.agent]
+max_turns = 150
+
+[env.agent.harness]
+id = "codex"
+version = "0.147.0"
+
+[env.agent.runtime]
+type = "prime"
+
+[env.agent.timeout]
+rollout = 3600
+
+# Rerun an attempt in a fresh sandbox when a provider call, the sandbox or the harness fails (never on reward).
+[env.agent.retries]
+max_retries = 2
+include = ["ProviderError", "SandboxError", "HarnessError"]
