@@ -16,14 +16,18 @@ uv pip install -e ./environments/physim
 uv run --no-sync vf-eval @ configs/physim/eval.toml --model YOUR_MODEL_ID
 ```
 
-The package pins its Blobkit release, current Verifiers commit, NumPy, and SciPy.
+The package pins its Blobkit and Verifiers release wheels, NumPy, and SciPy.
 Hugging Face support is included. No local Blobkit checkout or separately selected
 extras are needed. The PyPI project named `physim` is unrelated.
 
 The Verifiers pin currently includes the framework fixes proposed in
 [Verifiers #2731](https://github.com/PrimeIntellect-ai/verifiers/pull/2731):
 output tokens counted once per model call, and native context settings for Pi
-and Prime Agent. This is a pinned fork commit pending upstream review.
+and Prime Agent. The SHA-256-pinned wheel is built without source changes from
+upstream commit `a24f5e216d14a060e117396387f788c9555673a0` (`0.3.2.dev163`).
+The [dependency snapshot](https://github.com/swpo/verifiers/releases/tag/physim-a24f5e216d14)
+preserves the wheel, source archive, checksums, and provenance independently of
+the open PR's branch. Use an upstream released version once it includes these fixes.
 
 The default taskset contains **BF, p4g2_044, and XV**, one task per evaluation
 preparation in the catalog at pinned HF commit
