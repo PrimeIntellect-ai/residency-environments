@@ -28,7 +28,10 @@ DATASET_REVISION = "d9616cb2d5207d9b06943c0a263dbd4025228bea"
 """Immutable dataset input; every evaluation must identify its dataset revision."""
 SANDBOX_IMAGE = "prime/dtirandaz/midog-mitosis-sandbox:0.8.0"
 """Python 3.11 with Pillow 12.3.0 and NumPy 2.4.6 preinstalled (``scripts/midog-mitosis/sandbox/Dockerfile``), so a rollout
-installs nothing."""
+installs nothing. Prime image references take a tag, not a digest, and a tag can be pushed again, so this records the
+registry build behind ``0.8.0`` for every reported run: image ``zmex6nh1qoljeb1kgxinfhdc``, build
+``w24lzpop0w7jt9l4jtd0izi7``, pushed 2026-10-05. A new push of the tag gets a new build id, which the image's owner sees
+in the ``fullImagePath`` of ``prime images list -o json``."""
 WORKSPACE_NOTE = (
     "The image is also saved as image.jpg in the working directory. Python 3 has Pillow and NumPy installed. "
     "The sandbox has no network."

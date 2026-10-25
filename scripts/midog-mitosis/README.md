@@ -23,3 +23,5 @@ uv run --no-sync python scripts/midog-mitosis/audit.py outputs/<run-dir> audit.j
 uv run --no-sync python scripts/midog-mitosis/redteam.py scan outputs/<run-dir>
 prime images push midog-mitosis-sandbox:<version> --context scripts/midog-mitosis/sandbox --public
 ```
+
+Push every change to the sandbox image under a new tag, never an existing one. Then point `SANDBOX_IMAGE` in `environments/midog-mitosis/midog_mitosis/taskset.py` at it and record the image and build ids that `prime images list -o json` shows for it.
