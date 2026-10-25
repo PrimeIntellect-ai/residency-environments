@@ -1,0 +1,27 @@
+# Pipeline check on a GPU host: DeepSeek V4 Flash on the bash harness, 20M-token budget, 40 turns.
+model = "deepseek/deepseek-v4-flash"
+num_rollouts = 1
+max_concurrent = 1
+push = false
+
+[env.taskset]
+id = "pretrain-gym"
+
+[env.taskset.task.scoring]
+train_tokens = 20000000
+
+[env.taskset.task.scoring.eval_set]
+token_env = "SCORER_HF_TOKEN"
+
+[env.taskset.task.hub]
+max_download_gb = 50
+
+[env.agent]
+max_turns = 40
+
+[env.agent.harness]
+tool_timeout = 3600.0
+
+[env.agent.runtime]
+type = "docker"
+allow = []

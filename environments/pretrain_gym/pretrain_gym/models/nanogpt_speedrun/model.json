@@ -1,0 +1,25 @@
+{
+  "tokenizer": {
+    "repo_id": "HuggingFaceTB/SmolLM2-135M",
+    "revision": "93efa2f097d58c2a74874c7e644dbc9b0cee75a2",
+    "bos_token": "<|endoftext|>"
+  },
+  "model": {
+    "n_layer": 12,
+    "n_head": 6,
+    "dim": 768,
+    "seq_len": 2048,
+    "softcap": 15.0
+  },
+  "train": {
+    "batch_tokens": 131072,
+    "micro_batch_size": 16,
+    "muon_lr": 0.05,
+    "embed_lr": 0.6,
+    "head_lr": 0.008,
+    "cooldown_frac": 0.4,
+    "seed": 0,
+    "eval_every": 100,
+    "quick_eval_tokens": 2097152
+  }
+}

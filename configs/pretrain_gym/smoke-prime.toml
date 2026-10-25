@@ -1,0 +1,43 @@
+# Pipeline check from a CPU host: agent in a Prime CPU VM, scoring on a Prime GPU VM. 20M tokens, 40 turns.
+# Images: scripts/pretrain_gym/push_prime_images.sh v1 (replace the `prime/<user>/` prefix with yours).
+model = "deepseek/deepseek-v4.1-flash"
+num_rollouts = 1
+max_concurrent = 1
+push = false
+
+[env.taskset]
+id = "pretrain-gym"
+
+[env.taskset.task.workspace]
+image = "prime/hunterj/pretrain-gym-agent:v1"
+
+[env.taskset.task.scoring]
+train_tokens = 20000000
+
+[env.taskset.task.scoring.eval_set]
+token_env = "SCORER_HF_TOKEN"
+
+[env.taskset.task.scoring.scorer]
+backend = "prime"
+
+[env.taskset.task.scoring.scorer.prime]
+image = "prime/hunterj/pretrain-gym-scorer:v1"
+gpu = "H200_141GB:1"
+cpu = 16
+memory = 64
+disk = 100
+
+[env.agent]
+max_turns = 40
+
+[env.agent.harness]
+tool_timeout = 7200.0
+
+# Prime caps VMs at 64 GB and 128 GiB; values set here win over the task's workspace defaults.
+[env.agent.runtime]
+type = "prime"
+allow = []
+cpu = 16
+memory = 64
+disk = 120
+idle_timeout = 86400

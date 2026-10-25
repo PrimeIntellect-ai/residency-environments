@@ -1,0 +1,39 @@
+# The agent's workspace: CPU tools for reading, filtering, deduplicating, and tokenizing data,
+# and for running downloaded models (classifiers, embedders, small LMs) on CPU.
+# The workspace has no network at run time, so everything the agent may need is installed here.
+FROM python:3.12-slim-bookworm
+
+ENV PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates curl git jq less procps ripgrep zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install \
+    "datasets==5.1.0" \
+    "datasketch==2.0.0" \
+    "duckdb==1.5.6" \
+    "fasttext-numpy2-wheel==0.9.2" \
+    "numpy==2.4.6" \
+    "orjson==3.13.0" \
+    "pandas==3.0.6" \
+    "polars==2.0.0" \
+    "pyarrow==26.0.0" \
+    "regex==2026.9.29" \
+    "scikit-learn==1.9.1" \
+    "tokenizers==0.23.3" \
+    "tqdm==4.70.1" \
+    "zstandard==0.25.0"
+
+RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.14.1" \
+    && pip install "transformers==5.19.0" "safetensors==0.8.0"
+
+# fastText language identification (lid.176), a common first filter for web text.
+ARG LID176_SHA256=7e69ec5451bc261cc7844e49e4792a85d7f09c06789ec800fc4a44aec362764e
+RUN mkdir -p /opt/models \
+    && curl -fL --retry 8 --retry-all-errors \
+        https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin -o /opt/models/lid.176.bin \
+    && echo "${LID176_SHA256}  /opt/models/lid.176.bin" | sha256sum -c -
+
+WORKDIR /workspace

@@ -1,0 +1,37 @@
+[project]
+name = "pretrain-gym"
+description = "An agent curates a pretraining corpus; a fixed model trains on it and is scored by held-out loss."
+readme = "README.md"
+tags = ["data-curation", "pretraining", "huggingface", "datasets", "tool-use", "multi-turn", "train", "eval"]
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "verifiers==0.4.0",
+    "huggingface-hub==2.2.0",
+    "httpx>=0.27",
+    "tenacity>=8.5",
+    "tokenizers==0.23.3",
+    # Corpus preparation, run by host scoring jobs.
+    "numpy>=2.1",
+    "pyarrow==26.0.0",
+    "regex==2026.9.29",
+    "zstandard==0.25.0",
+]
+
+[project.optional-dependencies]
+# Training on this host's GPUs (`scoring.scorer.backend = "host"`).
+train = ["torch==2.14.1"]
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pretrain_gym"]
+
+[tool.hatch.build]
+include = ["pretrain_gym/**/*.py", "pretrain_gym/**/*.json", "pretrain_gym/**/*.md", "pyproject.toml"]
+
+[tool.verifiers.eval]
+num_examples = 1
+rollouts_per_example = 1

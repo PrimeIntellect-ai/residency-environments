@@ -1,0 +1,17 @@
+# Scoring jobs on a Prime GPU VM: corpus preparation and model training. Each job uploads its code,
+# corpus, and the evaluation set, so this image only carries their dependencies.
+FROM pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime
+
+ENV PIP_NO_CACHE_DIR=1 PIP_BREAK_SYSTEM_PACKAGES=1 PYTHONUNBUFFERED=1
+
+# torch.compile builds small C launchers for its GPU kernels; uploads arrive as .tar.zst.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+# numpy comes with the base image.
+RUN pip install \
+    "pyarrow==26.0.0" \
+    "regex==2026.9.29" \
+    "tokenizers==0.23.3" \
+    "zstandard==0.25.0"

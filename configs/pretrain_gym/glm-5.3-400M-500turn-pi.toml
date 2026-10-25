@@ -1,0 +1,29 @@
+# Full benchmark: z-ai/glm-5.3 on the Pi harness, 400M-token budget, 500 turns.
+model = "z-ai/glm-5.3"
+num_rollouts = 1
+max_concurrent = 1
+push = false
+
+[sampling]
+reasoning_effort = "max"
+
+[env.taskset]
+id = "pretrain-gym"
+
+[env.taskset.task.scoring.eval_set]
+token_env = "SCORER_HF_TOKEN"
+
+# Downloads land on the GPU host's disk; keep room for scoring.
+[env.taskset.task.hub]
+max_download_gb = 500
+
+[env.agent]
+max_turns = 500
+
+[env.agent.harness]
+id = "pi"
+tool_timeout = 7200.0
+
+[env.agent.runtime]
+type = "docker"
+allow = []
