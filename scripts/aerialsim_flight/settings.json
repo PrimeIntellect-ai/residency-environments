@@ -1,0 +1,16 @@
+{
+  "SeeDocsAt": "https://cosys-lab.github.io/Cosys-AirSim/settings/",
+  "SettingsVersion": 2.0,
+  "SimMode": "Multirotor",
+  "ClockSpeed": 1.0,
+  "CameraDefaults": {
+    "CaptureSettings": [
+      {
+        "ImageType": 0,
+        "Width": 640,
+        "Height": 360,
+        "FOV_Degrees": 90
+      }
+    ]
+  }
+}
