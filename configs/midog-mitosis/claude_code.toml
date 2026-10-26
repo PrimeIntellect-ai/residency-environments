@@ -1,0 +1,37 @@
+# Claude models in Claude Code, their own harness. The reported evaluation runs every model in Pi instead (pi.toml).
+#   uv run eval @ configs/midog-mitosis/claude_code.toml -m anthropic/claude-opus-5.5 -n 100
+# The agent runs in a Prime sandbox built from scripts/midog-mitosis/sandbox/Dockerfile (Pillow and NumPy preinstalled),
+# with no route out but the model's. The expected answers stay in the scoring process on the host, which reads only the
+# agent's final reply. Start with -n 3 before a full run: an agent that views and crops the image makes 20 to 40 model
+# calls per attempt.
+num_rollouts = 3
+max_concurrent = 8
+push = false
+
+# Reasoning models need room: a reply cut off inside its reasoning has no `Answer:` line and scores 0. `xhigh` is the
+# highest effort the Claude models accept below `max`.
+[sampling]
+max_tokens = 64000
+reasoning_effort = "xhigh"
+
+[env.taskset]
+id = "midog-mitosis"
+
+[env.agent]
+max_turns = 150
+
+# Claude Code 2.1.232, the framework's default, is refused by Claude Opus 5.5: it needs 2.1.280 or newer.
+[env.agent.harness]
+id = "claude_code"
+version = "2.1.280"
+
+[env.agent.runtime]
+type = "prime"
+
+[env.agent.timeout]
+rollout = 3600
+
+# Rerun an attempt in a fresh sandbox when a provider call, the sandbox or the harness fails (never on reward).
+[env.agent.retries]
+max_retries = 2
+include = ["ProviderError", "SandboxError", "HarnessError"]
