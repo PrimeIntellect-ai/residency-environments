@@ -272,7 +272,10 @@ class LabOracleRunner(R6.OracleRunner):
         if not observe_only <= set(range(n)) or len(observe_only) == n:
             raise ValueError("observe-only rows must be a proper subset of the field rows")
         if _actuators is None:
-            actuators = tuple((int(r), 1) for r in self._perm if int(r) not in observe_only)
+            if observe_only:
+                # Inject port p would no longer name the field read on observed port p.
+                raise ValueError("declare the actuator roster when observe-only rows exist")
+            actuators = tuple((int(r), 1) for r in self._perm)
         else:
             actuators = []
             for row, sign in _actuators:

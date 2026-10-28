@@ -144,14 +144,48 @@ With the default roster both are the base class's values, which the checks below
 | Check | Setup | Result |
 |---|---|---|
 | Identity, lab world | phase_membrane as in `runner_demo.py` (noise 0.01, gains 0.01): the pre-extension OracleRunner on LabStepper vs `oracle()` vs `LabOracleRunner.wrap`; the demo's pulseK program (2 members, 50 tu, every 1 tu) and a 20 tu program with pulses on all ports, moves, equal-time actions, a zero-amplitude and a one-tick pulse, ports permuted `[2, 0, 3, 1]` and a non-trivial adjustment map (3 members) | Bit-identical (byte comparison) in both; members differ; equal to the demo's saved forecast members; the same `ProtocolError` messages for seven invalid requests |
-| Identity, native Blobkit | Packaged BF genome, `init_soup` (seed 7, noise 0.002), `devices.step_chunk`, BF's port permutation, the same 20 tu program (2 members) | Bit-identical (OracleRunner, `wrap`, direct construction). `blobround6._native_oracle` cannot run here (`physim.blobcore` is not in this package), and no BF bundle is available offline, so the binding is `eval_preparation.make_oracle`'s on a fresh soup |
+| Identity, native Blobkit | Packaged BF genome, `init_soup` (seed 7, noise 0.002), `devices.step_chunk`, BF's port permutation, the same 20 tu program (2 members) | Bit-identical (OracleRunner, `wrap`, direct construction). `blobround6._native_oracle` cannot run here (`physim.blobcore` is not in this package). The script's own native check is a separate `step_chunk` binding on a fresh `init_soup`. A reviewer also ran the offline gt_bf bundle (`make_oracle` on the prepared BF state, case c002, seed 71001, 2 members, 50 tu): `LabOracleRunner.wrap` is bit-identical to `OracleRunner` |
 | Signed vorticity | Fed vortices as in `vortex_demo.py` (noise 0.003, om gain 0.01), roster (om,+), (om,-), (Y,+); amp 3 for 50 tu at each device centre, readouts every 1 tu | Finite throughout. First tick at the centre: +5.7e-4 and -5.7e-4 (ratio -1.000003; expected 6e-4). The '-' pulse turns the device0 body from +0.19 to -0.37 at 25 tu and -0.32 at 50 tu (+ pulse: 0.34, 0.30); probe range -0.37 to 0.20; global mean om -0.0017 (device0) and -0.0021 (device1) below sham at 50 tu. (om,+) equals the default roster's port 0 bit for bit and reproduces the earlier envelope run |
-| Observe-only speed | `Derived("speed", adv * hypot(uy, ux))` from the module's own `_vel`, roster (om,+), (om,-), (Y,+) | Returned by both probes and the global sensor (3 observed ports); om and Y identical bit for bit to the world without it; equal to the speed recomputed from the state at t=0 and after 50 ticks. Rejected as a target: `Actuator("speed")` and runner row 2 raise `ValueError`; port 3 raises `ProtocolError` ("must be [0, 2]"); on the default roster ((om,+), (Y,+)) speed's observed port 2 raises `ProtocolError` |
+| Observe-only speed | `Derived("speed", adv * hypot(uy, ux))` from the module's own `_vel`, roster (om,+), (om,-), (Y,+) | Returned by both probes and the global sensor (3 observed ports); om and Y identical bit for bit to the world without it; equal to the speed recomputed from the state at t=0 and after 50 ticks. Rejected as a target: `Actuator("speed")` and runner row 2 raise `ValueError`; port 3 raises `ProtocolError` ("must be [0, 2]"); a world with observe-only rows must declare its actuator roster: the default roster is refused (`ValueError`), because inject port p would no longer name the field read on observed port p |
 
 Native negative sources through `genome.poke` also work (BF activator 0, 2 tu at amp 3: global mean
 +0.0040 for '+', -0.0056 for '-'); that run is a smoke check, not part of the identity proof.
 Suites frozen by labeval before this change keep their declarations (checked for phase_membrane
 and the fed vortices).
+
+## Second round: suite scoring and two more worlds (28 Oct)
+
+All four worlds (phase_membrane, c53 fed vortices, c34 Marangoni rods, c40 CIPS cells) run through
+the runner with exact parity at zero noise. Controls are predictors from the same prepared state,
+as in `build_evaluation_bundle.py`, scored against native truths; ratio = control / independent native.
+
+- **Suite** (`scripts/physim/labworlds/labeval.py`, PhySim's `score_case`, frozen suite of 10-13
+  programs, 15 query times to 50 tu, score groups per sensor and port with scales frozen from a
+  calibration ensemble before any truth, 2 truths per case, 8-member controls). Aggregate ratios:
+  - phase_membrane: ignore actions 2.3, wrong probe geometry 1.8, initial persistence 7.2,
+    chi=0 7.6, gate=0 14.8, a=2 7.5, dt-halved null 0.87 (a second native ensemble scores 0.90
+    against the same 8-member reference, so the reference is noisy; early in the window the null's
+    global phi group is 1.5).
+  - fed vortices: ignore actions 6.5, wrong probe geometry 9.9, initial persistence 15.9, adv=0
+    10.8, kF=0 113, null 0.98.
+  - Not separated: ignore actions on a 1-unit probe move (phase_membrane), wrong probe geometry on
+    the global groups (by construction), adv=0 in the first 10 tu on the global groups.
+- **Marangoni rods** (1 native step of dt 0.05 per tick; 19 to 23-26 bodies per 50 tu window):
+  mar=0, passive, chis=0 and the naive controls score 2-50x. **The dt-halved null fails
+  (1.06-1.66)**: the world's first-order time stepping at dt 0.05 is not converged relative to the
+  noise (the deterministic dt error is 12-74% of the member spread at 1-5 tu). Any control ratio
+  below about 1.7 there cannot be told from a change of numerics (kappa=0 late on the probes, the
+  cargo pulse's ignore-actions control).
+- **CIPS cells** (192^2, 1 native step of dt 0.1 per tick, prepared at t=3600 with two divisions in
+  the window): kF=0 491-823x, turnover off (d=0) 39-74x, chi=0 224-404x, chi_s=0 48-103x, naive
+  controls 5-28x; the null scores like the reference overall (0.96-1.08, inside the two-ensemble
+  band 0.78-1.08) but fails at the pulse site (device0 1.18-1.41): the solver's handling of the
+  injected source is not converged at dt 0.1.
+
+**Decision for the contract.** A world is either (a) a discrete map whose time step is part of its
+definition, or (b) a continuum model whose numerics must pass the dt-halved null. Under (a) an
+agent that integrates the right equations more accurately is penalized up to 1.3-1.7x (rods); under
+(b) the rods need a smaller dt (about 2x cost) and the null re-tested.
 
 ## Open questions
 
