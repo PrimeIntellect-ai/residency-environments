@@ -6,7 +6,7 @@ everything the runner and the agent contract need that the module does not say:
 
 - ``fields``: the state keys that are dynamical fields, in port order.
 - ``steps_per_tick``: native steps per public tick (one tick is 0.02 time units).
-- ``noise``: per field, ``("additive" | "proportional", sd)``; sd is per sqrt(native
+- ``noise``: per field, ``("additive" | "proportional" | "conserved", sd)``; sd is per sqrt(native
   time). Noise draws come only from the runner's per-member generator, a fixed
   number per step, so actions never shift a member's noise stream.
 - ``ports``: per field, the source gain (native field units per native time per unit
@@ -99,6 +99,9 @@ class LabWorld:
     derived: tuple[Derived, ...] = ()
 
     def __post_init__(self):
+        for f, (kind, sd) in self.noise.items():
+            if f not in self.fields or kind not in ("additive", "proportional", "conserved") or sd < 0:
+                raise ValueError(f"noise for {f!r} must be additive, proportional or conserved with sd >= 0")
         derived = tuple(self.derived)
         names = [d.name for d in derived]
         if len(set(names)) != len(names) or set(names) & set(self.fields):
@@ -238,6 +241,13 @@ class LabStepper:
                         state[f] = np.clip(state[f], lo, hi)
                 for f in w.fields:
                     kind, sd = w.noise.get(f, ("additive", 0.0))
+                    if kind == "conserved":
+                        # Divergence of a white flux on the periodic grid: no net mass, per-pixel sd = sd.
+                        ey, ex = rng.standard_normal((2,) + state[f].shape)
+                        if sd > 0:
+                            div = (ey - np.roll(ey, 1, 0)) + (ex - np.roll(ex, 1, 1))
+                            state[f] = state[f] + sd * np.sqrt(h) * 0.5 * div
+                        continue
                     xi = rng.standard_normal(state[f].shape)
                     if sd > 0:
                         a = sd * np.sqrt(h)
