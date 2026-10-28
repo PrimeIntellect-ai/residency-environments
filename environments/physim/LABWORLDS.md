@@ -18,7 +18,8 @@ through `sample_truth`, with PhySim's own devices, scheduling, member seeding an
 - **Noise.** All draws come from the runner's per-member generator, a fixed number per step, so
   actions never shift a member's noise stream (paired controls stay paired).
 - **Observe-only channels.** A derived field (velocity, eating rate) can ride in `F` as an extra
-  field with no actuator; the runner samples it like any other port.
+  field with no actuator; the runner samples it like any other port. `LabOracleRunner` (below)
+  declares such channels and keeps them out of the inject roster.
 
 ## What a world declares
 
@@ -28,7 +29,7 @@ through `sample_truth`, with PhySim's own devices, scheduling, member seeding an
 | Native dt and native steps per public tick | The runner checks only the public tick. phase_membrane: 1 step per tick (1 tu = 50 native t); vortices: 1 step per tick (1 tu = 1 native t). |
 | Noise form and level per field | The form decides survival. Plain additive noise on fields the world clips at zero is a hidden source: it dissolved phase_membrane at sd 0.01 per sqrt(t), and filled the Marangoni bath with cargo. Proportional noise on concentrations, additive on order parameters and vorticity, conserved on conserved fields, kept each world intact up to about 0.01-0.03. |
 | Ports: observed and driven separately; for each driven port an actuator kind, a gain and a clip | PhySim's maximum program (amp 3 for 50 tu) made the numerics fail at gain 1 through phase_membrane's substrate, catalyst and phase field, the vortices' vorticity, and the rods' surfactant and phase field. Gains of 0.01 (and 0.1 for fuel) kept every port finite and in range. Velocity is recomputed every step, so injecting into it does nothing: observe-only. |
-| Signed actuators where the field is signed | Vorticity is signed; a non-negative pulse only adds one sign (it kills or flips the other). Offer a signed amplitude or a +/- port pair. |
+| Signed actuators where the field is signed | Vorticity is signed; a non-negative pulse only adds one sign (it kills or flips the other). PhySim's grammar has no signed amplitude, so offer a +/- port pair (`Actuator(field, +1)`, `Actuator(field, -1)`) or one port of the needed sign. |
 | Score groups and aggregate sensors | Chaotic worlds (vortices, rods) decorrelate within 50-200 t. Late in a window, whole-box statistics carry the mechanism (the rods' wall ablation separates only through cargo variance at 150 t). |
 | Privileged ablations, each prepared on its own | All battery ablations were switched on from the native prepared state; a hidden ablated world starts from its own prepared state, which is the fair score-meaning check. |
 | Prepared-state recipe (seed, time, overrides) | Identity must include parameter overrides, which several worlds read from the environment at import. |
@@ -55,8 +56,13 @@ through `sample_truth`, with PhySim's own devices, scheduling, member seeding an
   `fields` array assume a Blobkit genome. A lab bundle carries the world file, its overrides, the
   declaration above and a prepared state (named arrays, including module state), all hashed into
   its identity.
-- Ports: separate observed and driven maps (today an undriven port is a silent no-op that the agent
-  still sees); signed amplitudes; per-port actuator kinds.
+- Ports: observed and driven maps are now separate in the runner, with signed actuators
+  (`LabOracleRunner`, below). Still open: actuator kinds other than a Gaussian source, and the
+  scoring roster. `blobround6_eval.PublicRoster.n_ports` is both the inject-port bound
+  (`validate_case` parses actions against it) and the observed-port count of every sample array,
+  so `score_case` rejects valid requests when a world has more actuators than observed ports, and
+  accepts ports the runner rejects when it has fewer. Separating the two needs a scoring change
+  (that file's hash is in every suite's identity) or a lab-side roster.
 - Ablations: hooks in the world declaration, replacing the template-array edits in
   `build_evaluation_bundle.py`.
 - Agent spec: port counts and sensor descriptions come from the declaration.
@@ -98,6 +104,54 @@ per-member seeding. Scripts: `runner_demo.py`, `vortex_demo.py` (scratchpad `eva
 - **Caveats.** One prepared state per world; ablations branched from the native state; the pooled
   per-field scales are a stand-in for PhySim's declared score groups; native-vs-native scores in the
   phase_membrane global group are small, which inflates its ratios.
+
+## Ports interface: `LabOracleRunner` (28 Oct)
+
+`physim/labworld.py` keeps the agent's inject roster apart from the observed ports. It does not
+touch `blobround6.py`, `devices.py` or `bundles.py`, whose source hashes are part of PhySim's
+implementation identity.
+
+**Declaration** (`LabWorld`, new keys default to the old behaviour):
+
+| Key | Meaning |
+|---|---|
+| `fields` | Dynamical fields, the first rows of `F`, as before. |
+| `derived=(Derived(name, fn), ...)` | Observe-only channels: `fn(module, state)` on the module state at t=0 and after every runner advance (every tick at which anything is read). They ride in `F` after the fields, so the probes and the global sensor read them. They must not modify the state or draw random numbers. |
+| `observed` (property) | `fields + derived`: what every sensor returns, in port order. |
+| `actuators=(Actuator(field, sign), ...)` | The public inject roster: an inject on port `p` is a source of `sign * gain * amp` (the field's `Port` gain and clip) on `actuators[p].field`. Each actuator names a dynamical field with a declared `Port`; a derived channel, an unknown field, a field without a gain, a sign other than +1/-1 or a duplicate is a `ValueError` at declaration. |
+| `actuators=None` | OracleRunner's roster: port `p` drives the field observed on port `p` with sign +1 (over the fields only, when derived channels exist). A field without a `Port` is still a silent no-op here, as before; an explicit roster refuses it. |
+| `declaration()` | JSON-ready declaration; omits `actuators` and `derived` when undeclared, so suites frozen before them (labeval's) are unchanged. |
+
+A signed field is offered as a +/- pair, or as a single port of either sign. One bipolar port is not
+expressible within PhySim's grammar: `_parse` fixes the inject keys and requires `amp` in [0, 3].
+
+**Runner.** `LabOracleRunner(OracleRunner)` takes the base constructor's arguments plus
+`_actuators` (a sequence of `(F row, sign)`) and `_observe_only` (F rows that no actuator may name);
+`LabOracleRunner.wrap(runner, actuators=None, observe_only=())` rebinds an existing OracleRunner
+(for example a native Blobkit binding). `oracle(world, state, devices)` builds one from a
+declaration. Requests are parsed with `inject.port` in [0, `n_actuators`); every sample array has
+`n_observed` ports. A pulse reaches the stepper as `field=row, amp=sign * amp`, so `LabStepper`
+and the native `step_chunk` (through `genome.poke`) both apply negative sources unchanged.
+
+Reused from blobround6 unchanged: the constructor's checks, `_parse`, `_effective_actions`,
+`_truth_member_seed`, `_clone_sim`, `_adjust_pose`, `_advance`, `_fill_queries` and `_sample`.
+Copied: the body of `OracleRunner.sample_truth` (its scheduler, about 35 lines), with two changes:
+the action parse uses the actuator count, and a pulse's field and amplitude come from its actuator.
+With the default roster both are the base class's values, which the checks below confirm bit for bit.
+
+**Checks** (`scripts/physim/labworlds/ports_check.py`; logs in scratchpad `evalpilot/ports/`):
+
+| Check | Setup | Result |
+|---|---|---|
+| Identity, lab world | phase_membrane as in `runner_demo.py` (noise 0.01, gains 0.01): the pre-extension OracleRunner on LabStepper vs `oracle()` vs `LabOracleRunner.wrap`; the demo's pulseK program (2 members, 50 tu, every 1 tu) and a 20 tu program with pulses on all ports, moves, equal-time actions, a zero-amplitude and a one-tick pulse, ports permuted `[2, 0, 3, 1]` and a non-trivial adjustment map (3 members) | Bit-identical (byte comparison) in both; members differ; equal to the demo's saved forecast members; the same `ProtocolError` messages for seven invalid requests |
+| Identity, native Blobkit | Packaged BF genome, `init_soup` (seed 7, noise 0.002), `devices.step_chunk`, BF's port permutation, the same 20 tu program (2 members) | Bit-identical (OracleRunner, `wrap`, direct construction). `blobround6._native_oracle` cannot run here (`physim.blobcore` is not in this package), and no BF bundle is available offline, so the binding is `eval_preparation.make_oracle`'s on a fresh soup |
+| Signed vorticity | Fed vortices as in `vortex_demo.py` (noise 0.003, om gain 0.01), roster (om,+), (om,-), (Y,+); amp 3 for 50 tu at each device centre, readouts every 1 tu | Finite throughout. First tick at the centre: +5.7e-4 and -5.7e-4 (ratio -1.000003; expected 6e-4). The '-' pulse turns the device0 body from +0.19 to -0.37 at 25 tu and -0.32 at 50 tu (+ pulse: 0.34, 0.30); probe range -0.37 to 0.20; global mean om -0.0017 (device0) and -0.0021 (device1) below sham at 50 tu. (om,+) equals the default roster's port 0 bit for bit and reproduces the earlier envelope run |
+| Observe-only speed | `Derived("speed", adv * hypot(uy, ux))` from the module's own `_vel`, roster (om,+), (om,-), (Y,+) | Returned by both probes and the global sensor (3 observed ports); om and Y identical bit for bit to the world without it; equal to the speed recomputed from the state at t=0 and after 50 ticks. Rejected as a target: `Actuator("speed")` and runner row 2 raise `ValueError`; port 3 raises `ProtocolError` ("must be [0, 2]"); on the default roster ((om,+), (Y,+)) speed's observed port 2 raises `ProtocolError` |
+
+Native negative sources through `genome.poke` also work (BF activator 0, 2 tu at amp 3: global mean
++0.0040 for '+', -0.0056 for '-'); that run is a smoke check, not part of the identity proof.
+Suites frozen by labeval before this change keep their declarations (checked for phase_membrane
+and the fed vortices).
 
 ## Open questions
 
