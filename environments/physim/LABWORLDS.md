@@ -197,6 +197,34 @@ world. Consequences: dynamics noise is defined in the continuum (a fixed correla
 world units, not white per pixel), and a world's claimed behaviour is re-checked at an admissible
 resolution before it becomes an evaluation.
 
+## Convergence study (29 Oct): Marangoni rods and CIPS cells
+
+Correlated dynamics noise is now available (`LabWorld.noise_corr = {field: ell}`, a periodic
+Gaussian of standard deviation `ell` world units, rescaled to the white form's per-point variance;
+conserved noise filters the divergence; default bit-identical; commit b23a593). Both studies used
+ell = 2 world units and sd 0.01.
+
+| | Marangoni rods | CIPS cells |
+|---|---|---|
+| Time (dt-halved null, 18 cells, native band from pooled independent natives) | native dt 0.05 passes | native dt 0.1 passes (thin margin at the pulse site) |
+| Space (grid refined at fixed box) | 128^2 fails; 192^2 converged for every field except cargo, which fails at every window and is not converged at 256^2 | fails: 288^2 and 384^2 not converged; the amphiphile layer is about a pixel thick and keeps sharpening |
+| Claimed behaviour at finer grids (2 fresh seeds, no noise) | rods, rings and swim-then-divide survive; persistent splits 21/22 -> 16/18; cargo containment 11.9/11.0 -> 17.5/18.2 and still rising | splits, layers on every body and death under a local fuel cut survive; first division 320-940 t earlier; the diagonal division preference weakens (likely a grid artefact) |
+| Cost per member per 50 tu | 192^2: about 113 s (2.3x native) | 288^2: 54 s; 384^2: about 93 s; converged: unknown |
+
+Lessons:
+- **The noise must be specified before the resolution.** At equal per-point variance, ell = 2 noise
+  is several times stronger than white noise (member spread 3-12x early in the window), which is
+  why the native dt now passes, and it costs sensitivity (the rods' ignore-actions control fell from
+  2.0-2.4x to 1.2-1.4x). Specify noise by its intensity in world units (sd scaled with 1/ell in 2D)
+  so that adding a correlation length does not also strengthen it, then find the admissible dt.
+- **Qualitative claims survive refinement; some numbers do not.** Division, rings, swim-then-divide,
+  layered cells and starvation death persist. Cargo containment ratios, division timing and division
+  axes are discretization numbers at the native grids: the worlds were tuned at the edge of resolution.
+- **Resolvable worlds make better evaluations.** Interfaces about a pixel thick cannot be converged
+  affordably. Interface width (gradient-energy and diffusion coefficients) is a parameter of the
+  continuum world; widening it until the behaviour converges at an affordable grid is legitimate,
+  and a world whose behaviour needs unresolvable interfaces is a poor evaluation candidate.
+
 ## Open questions
 
 - Whether to keep raw Python steppers or widen Blobkit's genome into a term list for field worlds
