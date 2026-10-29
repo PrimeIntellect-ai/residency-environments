@@ -15,6 +15,18 @@ everything the runner and the agent contract need that the module does not say:
   is exactly the white form's; the draws per step are unchanged. ``conserved`` smooths the
   divergence of the white flux, so it still adds no mass. White noise per pixel changes
   with the grid; correlated noise has a continuum limit. A field not listed stays white.
+- ``noise_intensity``: fields whose ``sd`` is the intensity of the continuum noise in world
+  units instead of a per-point level. The noise is then the grid sample of a continuum
+  field whose spectral density at low wavenumber is ``sd^2`` per native time (``(sd/2)^2 k^2``
+  for ``conserved``, whose flux has intensity ``(sd/2)^2``), whatever the grid spacing ``dx``
+  or the correlation length: white draws are scaled by ``1/dx`` (``0.5/dx^2`` for the
+  divergence of the conserved flux) and, with an ``ell`` in ``noise_corr``, smoothed by the
+  same Gaussian with unit gain at k = 0 (not rescaled to the white per-point variance). So
+  adding or changing ``ell`` leaves the large-scale forcing unchanged and the per-point sd
+  falls like ``1/(2 sqrt(pi) ell)`` for ``ell >> dx`` (2D). At ``dx = 1`` and no ``ell`` it
+  is the white form bit for bit; a white level ``s`` per point at spacing ``dx0`` is the
+  intensity ``s * dx0`` (``s * dx0^2`` for conserved). A field not listed keeps the
+  per-point meaning above.
 - ``ports``: per field, the source gain (native field units per native time per unit
   of PhySim amplitude) and an optional clip applied after each injection.
 - ``dx``: world units per pixel; the Gaussian source width is in world units.
@@ -104,6 +116,7 @@ class LabWorld:
     actuators: tuple[Actuator, ...] | None = None
     derived: tuple[Derived, ...] = ()
     noise_corr: dict = field(default_factory=dict)
+    noise_intensity: tuple[str, ...] = ()
 
     def __post_init__(self):
         for f, (kind, sd) in self.noise.items():
@@ -112,6 +125,12 @@ class LabWorld:
         for f, ell in self.noise_corr.items():
             if f not in self.fields or isinstance(ell, bool) or not np.isfinite(ell) or ell <= 0:
                 raise ValueError(f"noise correlation length for {f!r} must name a field and be finite and > 0")
+        if isinstance(self.noise_intensity, str):
+            raise ValueError("noise_intensity is a sequence of field names")
+        intensity = tuple(self.noise_intensity)
+        if len(set(intensity)) != len(intensity) or not set(intensity) <= set(self.noise):
+            raise ValueError("noise_intensity must list distinct fields that have a declared noise")
+        object.__setattr__(self, "noise_intensity", intensity)
         derived = tuple(self.derived)
         names = [d.name for d in derived]
         if len(set(names)) != len(names) or set(names) & set(self.fields):
@@ -149,6 +168,8 @@ class LabWorld:
         d = dataclasses.asdict(self)
         if not self.noise_corr:
             d.pop("noise_corr")
+        if not self.noise_intensity:
+            d.pop("noise_intensity")
         if self.actuators is None:
             d.pop("actuators")
         if self.derived:
@@ -218,6 +239,53 @@ class LabStepper:
             self._filters[key] = np.exp(-0.5 * ell**2 * (ky**2 + kxr**2)) / np.sqrt(var)
         return np.fft.irfft2(self._filters[key] * np.fft.rfft2(x), s=x.shape)
 
+    def _intensity(self, x, ell=None, conserved=False):
+        """Unit-intensity continuum noise sampled on the grid, from white draws ``x`` (or the
+        index-unit divergence of a white flux): scaled by ``1/dx`` (``0.5/dx^2``) and, when
+        ``ell`` is given, smoothed by a periodic Gaussian of standard deviation ``ell`` world
+        units with unit gain at k = 0, so the low-wavenumber spectrum does not depend on ``ell``."""
+        dx = self.world.dx
+        c = 0.5 / dx**2 if conserved else 1.0 / dx
+        if ell is None:
+            return x * c
+        key = ("intensity", x.shape, float(ell), conserved)
+        if key not in self._filters:
+            n0, n1 = x.shape
+            ky = 2 * np.pi * np.fft.fftfreq(n0, d=dx)[:, None]
+            kxr = 2 * np.pi * np.fft.rfftfreq(n1, d=dx)[None, :]
+            self._filters[key] = c * np.exp(-0.5 * ell**2 * (ky**2 + kxr**2))
+        return np.fft.irfft2(self._filters[key] * np.fft.rfft2(x), s=x.shape)
+
+    def add_noise(self, state, rng, h):
+        """One native step's dynamics noise on every field (``state`` entries replaced). The draws
+        per field are fixed (two arrays for conserved, one otherwise) whatever the levels."""
+        w = self.world
+        for f in w.fields:
+            kind, sd = w.noise.get(f, ("additive", 0.0))
+            ell = w.noise_corr.get(f)
+            intensity = f in w.noise_intensity
+            if kind == "conserved":
+                # Divergence of a white flux on the periodic grid: no net mass (per-point form: per-pixel sd = sd).
+                ey, ex = rng.standard_normal((2,) + state[f].shape)
+                if sd > 0:
+                    div = (ey - np.roll(ey, 1, 0)) + (ex - np.roll(ex, 1, 1))
+                    if intensity:
+                        state[f] = state[f] + sd * np.sqrt(h) * self._intensity(div, ell, conserved=True)
+                    elif ell is None:
+                        state[f] = state[f] + sd * np.sqrt(h) * 0.5 * div
+                    else:
+                        state[f] = state[f] + sd * np.sqrt(h) * self._smooth(div, ell, conserved=True)
+                continue
+            xi = rng.standard_normal(state[f].shape)
+            if sd > 0:
+                if intensity:
+                    xi = self._intensity(xi, ell)
+                elif ell is not None:
+                    xi = self._smooth(xi, ell)
+                a = sd * np.sqrt(h)
+                state[f] = state[f] + (a * xi if kind == "additive" else a * xi * state[f])
+        return state
+
     def _bump(self, shape, y, x):
         key = (shape, round(y, 9), round(x, 9))
         if key not in self._bumps:
@@ -269,25 +337,7 @@ class LabStepper:
                     lo, hi = port.clip
                     if lo is not None or hi is not None:
                         state[f] = np.clip(state[f], lo, hi)
-                for f in w.fields:
-                    kind, sd = w.noise.get(f, ("additive", 0.0))
-                    ell = w.noise_corr.get(f)
-                    if kind == "conserved":
-                        # Divergence of a white flux on the periodic grid: no net mass, per-pixel sd = sd.
-                        ey, ex = rng.standard_normal((2,) + state[f].shape)
-                        if sd > 0:
-                            div = (ey - np.roll(ey, 1, 0)) + (ex - np.roll(ex, 1, 1))
-                            if ell is None:
-                                state[f] = state[f] + sd * np.sqrt(h) * 0.5 * div
-                            else:
-                                state[f] = state[f] + sd * np.sqrt(h) * self._smooth(div, ell, conserved=True)
-                        continue
-                    xi = rng.standard_normal(state[f].shape)
-                    if sd > 0:
-                        if ell is not None:
-                            xi = self._smooth(xi, ell)
-                        a = sd * np.sqrt(h)
-                        state[f] = state[f] + (a * xi if kind == "additive" else a * xi * state[f])
+                state = self.add_noise(state, rng, h)
                 state = self.module.step(state)
             sim["t_step"] += 1
         sim["F"] = self.observe(state)
