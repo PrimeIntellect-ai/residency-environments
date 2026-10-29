@@ -225,6 +225,27 @@ Lessons:
   continuum world; widening it until the behaviour converges at an affordable grid is legitimate,
   and a world whose behaviour needs unresolvable interfaces is a poor evaluation candidate.
 
+## Acceptance versus curation (decided 29 Oct)
+
+An evaluation is defined at one declared resolution and time step; its truths are that simulation.
+No continuum limit has to be shown for scoring to be valid.
+
+**Acceptance (required for a valid evaluation):** parity of the runner with the native module;
+an amplitude envelope that keeps every driven port finite and in range; nonzero member spread;
+every mechanism and naive control separating from an independent native ensemble beyond the
+native-vs-native band; noise declared per field.
+
+**Curation (which worlds we publish; not part of the evaluation):**
+- the claimed behaviours persist, and their measures trend smoothly, under 1.5-2x refinement in
+  space and time;
+- no grid-direction effects (a 45-degree rotation of the initial state gives the same statistics);
+- noise defined in world units (correlation length and intensity);
+- the numerics penalty (the dt-halved and refined-grid predictors' score ratio) is small next to
+  the smallest control separation the evaluation relies on.
+
+A world whose claimed behaviour is a grid artefact rewards modelling the lattice instead of the
+mechanism, so it fails curation even if it passes acceptance.
+
 ## Open questions
 
 - Whether to keep raw Python steppers or widen Blobkit's genome into a term list for field worlds
