@@ -246,6 +246,25 @@ native-vs-native band; noise declared per field.
 A world whose claimed behaviour is a grid artefact rewards modelling the lattice instead of the
 mechanism, so it fails curation even if it passes acceptance.
 
+## Curation results (29 Oct)
+
+Noise by intensity (`LabWorld.noise_intensity`, commit b4bdebc): sd is read as an intensity in world
+units (white draws scaled by 1/dx, 0.5/dx^2 for conserved; a correlation length smooths without
+changing the k=0 forcing), so changing ell or the grid no longer changes the large-scale noise.
+Low-k spectra agree to 0.98-1.01 across ell and grids; existing declarations are bit-identical.
+Control separation falls roughly as 1/intensity; the numerics penalty rises as noise falls.
+
+| World | Refinement (a) | Isotropy (b) | Numerics penalty (d) | Noise candidate (ell = 2) | Verdict |
+|---|---|---|---|---|---|
+| fed vortices | splits, generations, same-sign daughters, speed consistent at 128^2/192^2/256^2 and dt/2 within chaotic spread | isotropic: division and motion axes within +-0.1 of no preference, rotated and refined alike | 1.02-1.07 against a smallest separation of 1.41 | intensity 0.003: behaviour holds, dt null 1.02, controls 11-18x; continued splitting under noise not yet tested long (splits after t=300 fall as noise rises) | passes; first evaluation candidate |
+| phase_membrane | splits and generations show no trend; the link ring's rim/core contrast persists (+5% then level), but rim/outside contrast is about 40% low at 128^2 (9-11 against 13-19) | division and motion isotropic; elongated cells lean weakly toward the grid axes (10 of 10 runs positive at 128^2), weakening with refinement | 1.05 at 10 tu (global phi 1.37) | 0.03 is marginal: a second dt/2 null draw gives 1.04-1.08; 0.01 needs dt halved and a dt/4 null; nucleations appear at 0.03 | passes with flags |
+| CIPS cells | (from the convergence study) division survives; layer peak and timing not converged | **diagonal division is a grid artefact**: the axis-only drift fluxes turn bodies toward the diagonals (planted ellipses rotate 15-25 degrees; rotated starts still split on diagonals); an isotropic drift stencil (2/3 axis + 1/3 diagonal fluxes) gives chance-level axes while division, a second round and the layer survive, later than with the standard stencil | not measured | not measured | fails (b) as written; passes with the isotropic stencil |
+
+Also: device1's ignore-actions group never separates in either suite (a device0 pulse does not reach
+device1 within 50 tu), so an evaluation must not rely on that group; and the suite's own numerical
+null shared member seeds with independent_native, which overstated its precision (an independent
+dt-halved ensemble confirms the result).
+
 ## Open questions
 
 - Whether to keep raw Python steppers or widen Blobkit's genome into a term list for field worlds
