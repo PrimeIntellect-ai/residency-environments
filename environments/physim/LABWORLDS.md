@@ -187,6 +187,16 @@ definition, or (b) a continuum model whose numerics must pass the dt-halved null
 agent that integrates the right equations more accurately is penalized up to 1.3-1.7x (rods); under
 (b) the rods need a smaller dt (about 2x cost) and the null re-tested.
 
+## World definition (decided 29 Oct)
+
+A world is a continuum model; a discretization is an approximation of it. A resolution (dt, grid)
+is admissible for an evaluation when refining it (dt halved; grid refined at fixed physical size,
+with devices and sources in world units) changes the evaluation's scores by no more than the
+spread between two independent native ensembles. Coarser resolutions show the integrator, not the
+world. Consequences: dynamics noise is defined in the continuum (a fixed correlation length in
+world units, not white per pixel), and a world's claimed behaviour is re-checked at an admissible
+resolution before it becomes an evaluation.
+
 ## Open questions
 
 - Whether to keep raw Python steppers or widen Blobkit's genome into a term list for field worlds
