@@ -9,6 +9,12 @@ everything the runner and the agent contract need that the module does not say:
 - ``noise``: per field, ``("additive" | "proportional" | "conserved", sd)``; sd is per sqrt(native
   time). Noise draws come only from the runner's per-member generator, a fixed
   number per step, so actions never shift a member's noise stream.
+- ``noise_corr``: per field, an optional spatial correlation length ``ell`` in world units.
+  The field's white draws are smoothed by a periodic Gaussian filter of standard deviation
+  ``ell`` (noise covariance ``exp(-r^2 / (4 ell^2))``) and rescaled so the per-point variance
+  is exactly the white form's; the draws per step are unchanged. ``conserved`` smooths the
+  divergence of the white flux, so it still adds no mass. White noise per pixel changes
+  with the grid; correlated noise has a continuum limit. A field not listed stays white.
 - ``ports``: per field, the source gain (native field units per native time per unit
   of PhySim amplitude) and an optional clip applied after each injection.
 - ``dx``: world units per pixel; the Gaussian source width is in world units.
@@ -97,11 +103,15 @@ class LabWorld:
     carry: tuple[str, ...] | None = None
     actuators: tuple[Actuator, ...] | None = None
     derived: tuple[Derived, ...] = ()
+    noise_corr: dict = field(default_factory=dict)
 
     def __post_init__(self):
         for f, (kind, sd) in self.noise.items():
             if f not in self.fields or kind not in ("additive", "proportional", "conserved") or sd < 0:
                 raise ValueError(f"noise for {f!r} must be additive, proportional or conserved with sd >= 0")
+        for f, ell in self.noise_corr.items():
+            if f not in self.fields or isinstance(ell, bool) or not np.isfinite(ell) or ell <= 0:
+                raise ValueError(f"noise correlation length for {f!r} must name a field and be finite and > 0")
         derived = tuple(self.derived)
         names = [d.name for d in derived]
         if len(set(names)) != len(names) or set(names) & set(self.fields):
@@ -137,6 +147,8 @@ class LabWorld:
         """JSON-ready declaration. The port-interface keys appear only when declared, so a
         declaration frozen before they existed (labeval suites) is unchanged."""
         d = dataclasses.asdict(self)
+        if not self.noise_corr:
+            d.pop("noise_corr")
         if self.actuators is None:
             d.pop("actuators")
         if self.derived:
@@ -187,6 +199,24 @@ class LabStepper:
                 self.aux_template = copy.deepcopy(rebuilt)
         self.aux_template.pop("_grid", None)
         self._bumps = {}
+        self._filters = {}
+
+    def _smooth(self, x, ell, conserved=False):
+        """``x`` (white draws, or the raw divergence of a white flux) smoothed by a periodic Gaussian
+        of standard deviation ``ell`` world units, scaled to unit per-point variance."""
+        key = (x.shape, float(ell), conserved)
+        if key not in self._filters:
+            n0, n1 = x.shape
+            dx = self.world.dx
+            ky = 2 * np.pi * np.fft.fftfreq(n0, d=dx)[:, None]
+            kx = 2 * np.pi * np.fft.fftfreq(n1, d=dx)[None, :]
+            gain2 = np.exp(-(ell**2) * (ky**2 + kx**2))  # |G|^2 on the full spectrum
+            if conserved:  # power of the backward-difference divergence of a unit white flux
+                gain2 = gain2 * (2 * (1 - np.cos(ky * dx)) + 2 * (1 - np.cos(kx * dx)))
+            var = float(gain2.mean())  # per-point variance of the filtered field (Parseval)
+            kxr = 2 * np.pi * np.fft.rfftfreq(n1, d=dx)[None, :]
+            self._filters[key] = np.exp(-0.5 * ell**2 * (ky**2 + kxr**2)) / np.sqrt(var)
+        return np.fft.irfft2(self._filters[key] * np.fft.rfft2(x), s=x.shape)
 
     def _bump(self, shape, y, x):
         key = (shape, round(y, 9), round(x, 9))
@@ -241,15 +271,21 @@ class LabStepper:
                         state[f] = np.clip(state[f], lo, hi)
                 for f in w.fields:
                     kind, sd = w.noise.get(f, ("additive", 0.0))
+                    ell = w.noise_corr.get(f)
                     if kind == "conserved":
                         # Divergence of a white flux on the periodic grid: no net mass, per-pixel sd = sd.
                         ey, ex = rng.standard_normal((2,) + state[f].shape)
                         if sd > 0:
                             div = (ey - np.roll(ey, 1, 0)) + (ex - np.roll(ex, 1, 1))
-                            state[f] = state[f] + sd * np.sqrt(h) * 0.5 * div
+                            if ell is None:
+                                state[f] = state[f] + sd * np.sqrt(h) * 0.5 * div
+                            else:
+                                state[f] = state[f] + sd * np.sqrt(h) * self._smooth(div, ell, conserved=True)
                         continue
                     xi = rng.standard_normal(state[f].shape)
                     if sd > 0:
+                        if ell is not None:
+                            xi = self._smooth(xi, ell)
                         a = sd * np.sqrt(h)
                         state[f] = state[f] + (a * xi if kind == "additive" else a * xi * state[f])
                 state = self.module.step(state)
