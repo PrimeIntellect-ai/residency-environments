@@ -16,7 +16,7 @@ Finalization uses three trust domains:
 2. A fresh runtime from the same split image executes candidate code with test inputs but no expected answers. Candidate commands run in a timeout-managed process group; timeout sends `TERM`, escalates to `KILL`, records return code `124`, skips an unavailable determinism rerun, and continues to grading. Concrete observations and profile outputs travel in a host-controlled payload outside `/workspace`; stdout never carries score-bearing data.
 3. A second fresh runtime from the dedicated grader image receives those artifacts and the grader-only dataset payload. It computes reward without executing agent-controlled code.
 
-Both temporary runtimes use `vf.provision_runtime`, are network-restricted, and are torn down automatically. The weighted `workspace_score` reward is the evaluator's normalized score in `[0, 1]`; metrics report binary success, changed/final file counts, and evaluator subscores.
+Both temporary runtimes use `vf.provision_runtime`, are network-restricted, and are torn down automatically. The sole weighted `workspace_score` reward is binary: `1.0` only when the trusted evaluator reports strict success, otherwise `0.0`. Partial credit cannot affect training reward; the evaluator's normalized score remains available as the `diagnostic_score` metric, alongside success, changed/final file counts, and subscores.
 
 The task requests framework-only network access. A fresh runtime is used for every rollout, and generated paths are validated before being written or extracted.
 
@@ -70,4 +70,4 @@ For difficulty calibration, use `eval-d1-d4-paired-panel-48-v5` and `eval-d5-fam
 | `task.candidate_execution_timeout_seconds` | `120`         | Per-run candidate execution limit inside finalization           |
 | `task.candidate_kill_grace_seconds`        | `5`           | Grace period between candidate process-group termination signals |
 
-The package pins the dataset commit and all seven runtime images in `synthetic_workspace_gym/artifacts.json`. Changing task data, task behavior, or reward semantics requires publishing new immutable artifacts and bumping the package version.
+The package pins the dataset commit and all seven runtime images in `synthetic_workspace_gym/artifacts.json`. Changes to task data or image contents require new immutable artifact pins. Reward-only changes require a package version bump; version `0.2.4` uses the same frozen V5 artifacts as `0.2.3` but switches the training reward from partial credit to strict binary success. Results produced by the two package versions are not reward-comparable.

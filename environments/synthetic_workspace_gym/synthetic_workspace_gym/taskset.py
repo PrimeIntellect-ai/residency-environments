@@ -282,7 +282,7 @@ class SyntheticWorkspaceTask(
 
     @vf.reward(weight=1.0)
     async def workspace_score(self, trace: vf.Trace[SyntheticWorkspaceData, SyntheticWorkspaceState]) -> float:
-        return float(trace.state.evaluator_result.get("score", 0.0))
+        return float(bool(trace.state.evaluator_result.get("success", False)))
 
     @vf.metric
     async def workspace_metrics(
@@ -292,6 +292,7 @@ class SyntheticWorkspaceTask(
         result = trace.state.evaluator_result
         metrics = {
             "success": float(bool(result.get("success", False))),
+            "diagnostic_score": float(result.get("score", 0.0)),
             "changed_file_count": float(trace.state.changed_file_count),
             "final_file_count": float(trace.state.final_file_count),
         }
