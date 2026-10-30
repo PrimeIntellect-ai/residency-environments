@@ -15,6 +15,7 @@ from typing import Any, Literal
 import verifiers.v1 as vf
 from huggingface_hub import hf_hub_download
 from pydantic import Field, field_validator
+from verifiers.v1.configs.runtime import NetworkPolicyConfig
 from verifiers.v1.runtimes import provision_runtime
 
 Family = Literal[
@@ -163,7 +164,11 @@ class SyntheticWorkspaceTask(
 ):
     NEEDS_CONTAINER = True
 
-    async def setup(self, runtime: vf.Runtime) -> None:
+    async def setup(
+        self,
+        trace: vf.Trace[SyntheticWorkspaceData, SyntheticWorkspaceState],
+        runtime: vf.Runtime,
+    ) -> None:
         await _restore_baked_workspace(runtime, self.data.name or "swg-task")
 
     async def finalize(
@@ -193,12 +198,11 @@ class SyntheticWorkspaceTask(
 
         runner_config = _isolated_config(runtime, image=self.data.image or "")
         async with provision_runtime(runner_config, name=f"swg-runner-{trace.id}") as runner:
-            await runner.prepare_setup()
             await _restore_baked_workspace(runner, self.data.name or "swg-task")
             await _replace_workspace(runner, snapshot)
             for relative_path, content in execution_files.items():
                 await runner.write(_safe_path(EXECUTION_ROOT, relative_path), content)
-            await runner.prepare_execution([])
+            await _restrict_runtime(runner)
             execution, execution_outputs, executed_snapshot = await _execute_plan(
                 runner,
                 execution_plan,
@@ -213,7 +217,6 @@ class SyntheticWorkspaceTask(
 
         grader_config = _isolated_config(runtime, image=self.data.grader_image)
         async with provision_runtime(grader_config, name=f"swg-grader-{trace.id}") as grader:
-            await grader.prepare_setup()
             mkdir = await grader.run(
                 [
                     "/bin/mkdir",
@@ -240,7 +243,7 @@ class SyntheticWorkspaceTask(
             await grader.write("/opt/swg-grade/manifest.json", _json_bytes(manifest))
             await grader.write("/opt/swg-grade/initial-digests.json", _json_bytes(self.data.initial_digests))
             await grader.write("/opt/swg-grade/execution.json", _json_bytes(execution))
-            await grader.prepare_execution([])
+            await _restrict_runtime(grader)
             result = await grader.run(
                 [
                     "/usr/local/bin/python",
@@ -684,6 +687,18 @@ def _isolated_config(runtime: vf.Runtime, *, image: str) -> vf.RuntimeConfig:
     if "allow" in values:
         values.update({"allow": [], "block": ["*"]})
     return type(config).model_validate(values)
+
+
+async def _restrict_runtime(runtime: vf.Runtime) -> None:
+    policy = NetworkPolicyConfig(allow=[], block=["*"])
+    set_network = getattr(runtime, "set_network", None)
+    if set_network is not None:
+        await set_network(policy)
+        return
+    prepare_execution = getattr(runtime, "prepare_execution", None)
+    if prepare_execution is None:
+        raise vf.SandboxError("SWG runner has no supported network policy API")
+    await prepare_execution([])
 
 
 def _safe_path(root: str, relative_path: str) -> str:

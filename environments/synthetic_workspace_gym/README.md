@@ -37,14 +37,14 @@ uv pip install -e environments/synthetic_workspace_gym
 Run the required small integration smoke with the standard harness/runtime:
 
 ```bash
-uv run eval --taskset.id synthetic-workspace-gym -n 1 -r 2 --max-turns 4
+uv run vf-eval --env.taskset.id synthetic-workspace-gym -n 1 -r 2 --env.agent.max-turns 4
 ```
 
 Use the default `sft-easy-v5` mid-training manifest or select another immutable dataset manifest and filters:
 
 ```bash
-uv run eval --taskset.id synthetic-workspace-gym \
-  --env.taskset.manifest rl-eval-v3 \
+uv run vf-eval --env.taskset.id synthetic-workspace-gym \
+  --env.taskset.manifest rl-eval-v5 \
   --env.taskset.families '["script_repair","pipeline"]' \
   --env.taskset.difficulties '[4,5]' \
   -n 20 -r 3 --rich false --no-push
