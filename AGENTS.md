@@ -129,3 +129,13 @@ Tool descriptions are prompts; apply any rules that make sense for them.
 Tool descriptions are prompts belonging to the tool; describe what the tool does, not how to use it in your environment.
 
 > Reasoning: tool use should generalize across domains. The model should be able to figure out how to use a tool for a given task without being told so. This is analogous to the taskset <-> harness duality in verifiers: a harness is very general and can apply to any taskset. Custom tools should be prompted with this in mind.
+
+### Rewards
+
+Rewards are floats in [0, 1], inclusive. Each reward function returns a value in [0, 1], and weights are non-negative.
+
+> Reasoning: multi-environment training in prime-rl does no reward re-scaling, so a reward outside [0, 1] silently changes the relative weighting of that environment's gradients against every other environment's. The range never needs to encode direction: GRPO's group normalization makes *advantages* negative or positive from group statistics, so negative rewards or weights add nothing the trainer can use.
+
+Prefer a binary reward: 1 when the task is genuinely complete, verified by the most authoritative mechanism available (kernel, simulator, upstream evaluator), else 0. Partial or shaped rewards are the exception and need a stated reason in the environment's PR; every threshold they introduce is a judgment call and must be documented. Partial signal that is only observability belongs in metrics, not rewards.
+
+> Reasoning: partial rewards invite reward hacking.
