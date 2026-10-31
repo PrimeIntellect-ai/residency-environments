@@ -1,0 +1,796 @@
+{
+  "assignments": [
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "d320f48563fdba7d506c0eda4fc8afd91a2a9b70554667a1f6cf99b1fc1e0315",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d1.s250"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "3cccce8c6207283c6e6bd64cce76fbc3ca65b5febf8d79576b75f627caa6475f",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d2.s250"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "66829a3311b1fbd2ba66bcefef0053fb4f1ec0b57d6361891b2f7a529514cde2",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d3.s250"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "159971089ceced8df374bf5a47c0c7dfee2d66398672713dc694fef8944571dc",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d4.s250"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "addc382660f2d60cf3f141218715661521a0bbf37529fa6edcd2cdea344f655a",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d1.s251"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "8dcb58d09c15af2e79a234b831c7004bc79f66bd55ca40f5fe6cc29aef275880",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d2.s251"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "d439279211bd5d56b3f31a8dfce7eaeb61b0e9d76f0e03061642fabc328c4d1d",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d3.s251"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "033f5be080352fe48ab09e6bd3a6a3dd5fa5bb348ab78e8ab716825253be4c88",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d4.s251"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "0af7c2de820e6804f7fc5f59f0030fd4feab73b464247a1002ac97a7983e088f",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d1.s252"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "ac52768cba692754b92e1cbb7110cf1ec59421b84d4e439c4645c2c594c69f18",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d2.s252"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "eed83350cd64af356cb7e032b4d57d9eccf3723e96300191bec2e35861d67cbf",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d3.s252"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "tabular",
+      "metadata": {
+        "assignment_fingerprint": "a1f01b0310951ecc77fd4e1061861382c86569aea6cf11858ef074555bda4f9f",
+        "contributing_families": [
+          "tabular"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "supplier_restock_summary",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.tabular.supplier_restock_summary.d4.s252"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "38febae9533f57767bfea0944092d87abee4aac1124dfb877fe32856224b90d9",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d1.s250"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "d6a0e74f0f4da03ede3a108a69f573d8080de9066ebe093813bcfb78f272bb02",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d2.s250"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "281b48fdb200dd6914824510060e06995dd2208739dce5520cefab14e5093317",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d3.s250"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "d646e9073a3112b7907cd9fceda83ad5cc5b8ccf4aa1fe277ede9e700f88a7d0",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d4.s250"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "6f1edd23992eb07ae800e99df8e2f59b57c416354a5f006b070955d46f6edfc7",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d1.s251"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "466f534295840d64ae82d360440e8a44f68f55105925ce989d4b906d748a44aa",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d2.s251"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "5a7e93383ddd78b05712d3e21df8de4a1e0cb0b9320719bc8ee530a138352b6a",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d3.s251"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "3e06e1b17e5679b5f05eadcb8482dd18ccb639eb351e4563cdb7fe81e6383a08",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d4.s251"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "2e3b8739a776a1f1cdd2bbdf67b4187d593e4abde6eb7f681698be42348c80c0",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d1.s252"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "e1f4aab13bf86f9f3cc6cd2a456979cc3e65f60d729c7d11a5b52a194b28f4c4",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d2.s252"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "f4e9aa786cdb2c1ae7c439ee94aaf36f2bb38b85f9f5450ffae51bb1ed11699b",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d3.s252"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "script_repair",
+      "metadata": {
+        "assignment_fingerprint": "58c8f1912323f5283018f88cfa57789e340f52ec920704a9205d58920c3771d0",
+        "contributing_families": [
+          "script_repair"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "team_roster_export",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.script_repair.team_roster_export.d4.s252"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "eb1144cfe3cc5ed2716b64c931a0244dae8b1d6d7a845408ccf6aff584e62ca3",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d1.s250"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "5cdd2ca52c9157b6c3ba8da80b7b2faab5d657904bfe48d359019f1e8afe99d8",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d2.s250"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "6d96ad1a7a21e4e3582e9238c8cccd12776483270c5f9e0e7813f5acd974015c",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d3.s250"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "1a69063b5b8ad5b63c060b01a2da6986f360ad6cec1e09d50335364c99b851af",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d4.s250"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "14ed0de4d54b84131d6b2d80babe98cf5475bca5f0ca562f687e23d9b5b2c5d8",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d1.s251"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "261d96b6cba00d7c66a2514dba54c58bd9c55fdc13f85fedda44ad9242de35d6",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d2.s251"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "8ebe9e2ff302219a543602a75fc265c036d359f37b531a78b2ba4cc1e586a581",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d3.s251"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "d7fe13160316b2900fb7fe135d62354574f2bbf230c445b08c383bc6318038b2",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d4.s251"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "ed55daa8accdd5b6e78f5947032d8bba1c92f1d0c5f98e0d1eb05f8afd57ff66",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d1.s252"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "130a7ff5b733b1d84218dc22fe207129e4b0eb6750d0afddce6fbee217890d5a",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d2.s252"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "4f1e57e0e303aa7beaa20dc1da45ba60a7ca6011ed92d4c6d8bbb66fe4a0b533",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d3.s252"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "pipeline",
+      "metadata": {
+        "assignment_fingerprint": "a6ff2f5e5f68faff264d507c77abba2cd0faa1cdc92ea6eb5ffdff6ff74e6304",
+        "contributing_families": [
+          "pipeline"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "quality_gate_pipeline",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.pipeline.quality_gate_pipeline.d4.s252"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "3eaa72dc84c1c5ea4bec4b18e55da56acbe347fd83bca930bb016b76ec579620",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d1.s250"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "a89c9ea70b7365043543286d61c807338b0c4f0f5fda0ed6d6e39a4d137e8cc7",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d2.s250"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "260a65c4faed5119bec250dc46ba347a62ba73765d6345279f4b3811bdb64f64",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d3.s250"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "453809a2139b90f9dc5611caf901b2397e2abf6ebed643dc6b7c5e6e2dae7713",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 250,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d4.s250"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "3901b719b1b8255633245273c1290a0e37a59d284336e78988400b1097d76740",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d1.s251"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "e40f20dbafa38d70d82ca0291f11f47a3544c316ee762f4b43fe36a2eb867f7c",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d2.s251"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "626901cf10ccb934e0643de579c9017eb9d7f0a00760da4aa4c61ecd65134ae3",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d3.s251"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "1af732d5a619160c184be363eab47689f5496c6fa8fd78ab3e1bbcf0463a14aa",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 251,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d4.s251"
+    },
+    {
+      "difficulty": 1,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "bd9c5eb56ca2a65ffec836a4e10fd5fde4ba7e2aae5fe54d52592e2077cb954c",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d1.s252"
+    },
+    {
+      "difficulty": 2,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "375f76808909d311800a89f42e2d9c4b2251e33ef4c5ad1ce473fe344c3bc54b",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d2.s252"
+    },
+    {
+      "difficulty": 3,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "1fdd136f7d2a7294bc080ef5c2d606e8ccc81d3344380293faf4318a497e1a25",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d3.s252"
+    },
+    {
+      "difficulty": 4,
+      "env_id": null,
+      "family": "retrieval_workspace",
+      "metadata": {
+        "assignment_fingerprint": "2494547b7c4236be57721782d5d5826c6740e26e9eec6695e349ebaf7cc21a8c",
+        "contributing_families": [
+          "retrieval_workspace"
+        ],
+        "experiment": "eval-d1-d4-paired-panel-48-v3"
+      },
+      "scenario": "client_adapter_sync",
+      "seed": 252,
+      "split": "heldout",
+      "task_id": "swg.heldout.retrieval_workspace.client_adapter_sync.d4.s252"
+    }
+  ],
+  "created_at": "2026-09-11T00:00:00+05:30",
+  "metadata": {
+    "assignment_count": 48,
+    "disjoint_from": [],
+    "environment_version": "0.2.0.dev1",
+    "frozen": true,
+    "manifest_fingerprint": "9285e5c41e4dfd7b4ca5405d0a47795efa2f001273434882d46fe4779445503b",
+    "paired_seed_range": [
+      250,
+      252
+    ],
+    "panel": "paired_family_difficulty_calibration",
+    "reporting_strata": [
+      "family",
+      "difficulty"
+    ],
+    "rollouts_per_task": 5,
+    "scenario_partition": "heldout",
+    "supersedes": "eval-d1-d4-paired-panel-48-v2",
+    "training_readiness_correction": "grounded-exact-json-and-baseline-normalized-rewards-v1"
+  },
+  "name": "eval-d1-d4-paired-panel-48-v3",
+  "split_specs": {},
+  "version": "v3"
+}
