@@ -185,11 +185,14 @@ class LabWorld:
                 sys.path.insert(0, p)
         old = os.environ.get("WORLD_P")
         os.environ["WORLD_P"] = json.dumps(self.overrides)
+        bytecode = sys.dont_write_bytecode
+        sys.dont_write_bytecode = True  # a world folder (for example a bundle's) must stay byte-identical
         try:
             spec = importlib.util.spec_from_file_location(f"labworld_{abs(hash(self.path))}", self.path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         finally:
+            sys.dont_write_bytecode = bytecode
             if old is None:
                 os.environ.pop("WORLD_P", None)
             else:

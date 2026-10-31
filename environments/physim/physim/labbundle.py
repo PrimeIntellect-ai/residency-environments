@@ -94,6 +94,7 @@ def _load_function(root: Path, source: str, function: str):
     name = "labbundle_obs_" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.dont_write_bytecode = True  # bundle folders stay byte-identical; see LabBundle
     spec.loader.exec_module(module)
     fn = getattr(module, function, None)
     if not callable(fn):
@@ -201,6 +202,8 @@ def validate_lab_manifest(manifest):
         if type(record) is not dict or set(record) != {"path", "bytes", "sha256", "role", "profiles"}:
             raise BundleError("invalid file record")
         name = str(relative_path(record["path"]))
+        if "__pycache__" in name.split("/") or name.endswith(".pyc"):
+            raise BundleError("bytecode caches cannot be bundle files")
         if name in names or name == "manifest.json":
             raise BundleError("duplicate or self-referencing bundle file")
         names.add(name)
@@ -247,6 +250,8 @@ class LabBundle(Bundle):
             raise BundleError("unknown bundle profile")
         self.root = Path(directory).expanduser().resolve()
         self.profile = profile
+        # World code is imported from the bundle folder; never write bytecode caches into it.
+        sys.dont_write_bytecode = True
         self.manifest = validate_lab_manifest(read_json(self.root / "manifest.json"))
         self.manifest_sha256 = digest(self.root / "manifest.json")
         self.files = {r["path"]: r for r in self.manifest["files"]}
