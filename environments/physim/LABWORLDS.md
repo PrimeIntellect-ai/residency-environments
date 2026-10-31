@@ -265,6 +265,67 @@ device1 within 50 tu), so an evaluation must not rely on that group; and the sui
 null shared member seeds with independent_native, which overstated its precision (an independent
 dt-halved ensemble confirms the result).
 
+## Lab bundles and the fed-vortex evaluation candidate (31 Oct)
+
+**`physim/labbundle.py`.** A lab bundle has the Blobkit bundle's shape (manifest with world, preparation
+and suite identities, simulation/evaluation profiles, `suite.json`, `truth/*.npz`, `checks.json`) with the
+world as files: `world/` (the world file verbatim, the labkit modules it imports, `observables.py` for the
+observe-only channels), `labworld.json` (the declaration), `apparatus.json` (devices, observed-port
+permutation, adjustment matrix, protocol) and `preparation.npz` (fields and `carry` keys only; the rest of
+the module state is rebuilt by the world's `init`, nothing is unpickled). Schema `physim-lab-bundle-v1`; the
+world identity binds every world file, the declaration and the implementation (source hashes of
+`blobround6`, `labworld`, `devices`, `blobround6_eval`, `labbundle`; numpy and scipy versions).
+`LabBundle(Bundle)` provides what `taskset` and `evaluation` use (`manifest`, `roster`, `limits`, `suite`,
+`apparatus`, `protocol`, `verified_path`, `truth`, `references`, `check_runtime`, `make_oracle`);
+`open_bundle` picks it when the manifest declares a lab world, and `taskset.required_bundle` now calls
+`open_bundle`. Because `blobround6_eval.PublicRoster` has one port count, a lab bundle must declare as many
+observed ports as actuators (refused otherwise); the fed vortices meet this with two observe-only channels.
+Still Blobkit-only: `hub.fetch_bundle` and `cli.py` construct `Bundle` directly. A lab bundle runs its world
+file in the grader's host process (trusted-code policy still open), and any edit of the hashed sources
+invalidates it until its manifest is rewritten.
+
+**Fed vortices, end to end** (scripts `fedvortex_bundle.py`, `fedvortex_report.py`, `fedvortex_validate.py`):
+
+- *Behaviour under the chosen noise* (intensity 0.003, ell 2; om additive, Y proportional), fresh seeds 21
+  and 22 to t=3000: 49 and 36 persistent splits, maximum generation 10 and 12, every daughter of its
+  parent's sign (49/49, 36/36), 20 and 16 splits after t=2000, last at t=2916/2922 (noise-free claim:
+  34-42, generation 9-10). Splitting does not stop; the 0.001 fallback was not needed.
+- *Ports.* (om,-), (Y,+), (om,+), (Y,-) in public order; gains 0.01 and 0.1 (Y clipped at 0). Amp 3 for
+  50 tu at the worst site stays finite with om in [-0.33, 0.40] (body peaks 0.22) and Y in [0, 2.4];
+  (Y,-) starves a vortex to nothing within the window. Observe-only eating rate and flow speed make
+  the observed count equal the actuator count (4).
+- *Preparation and programs.* init(31) to t=580 under the declared noise; device 0 on the neck of a rod
+  that pinches into two same-sign daughters at about 23 tu, device 1 on a drifting vortex (12 units in
+  50 tu); adjustment matrix diag(3, 3, 1). Feeding an isolated vortex does not make it divide within 50
+  tu (fed vortices spin up and round off), so the division programs act on the rod: feeding its neck
+  suppresses the pinch, starving it pinches at about 8 tu, feeding from t=10 delays it to about 33.
+  Other targeted programs: feed, starve, cut (om-) and follow the device-1 vortex.
+- *Suite* (15 programs, 12 groups, scales frozen from 12 calibration members, 2 truths per case):
+  64-member native reference 0.0353 (worst case 0.048). Ratios to the mean of 16 independent 4-member
+  native slices (aggregate band 0.94-1.05): ignore actions 11.8, wrong geometry 13.5, initial
+  persistence 23.6, flow off 116, regrowth off 154, growth off 238 and decay off 1989 (5 cases each),
+  body-uniform gain 12.2, dt-halved null 1.02 (0.98-1.06). Every mechanism control fails on every case
+  it was run on, including its targeted programs; these ablations are global, so the targeted programs
+  are not needed to detect them (they raise the ratio at most about 2x over the sham).
+- *Division-specific control: none clean.* The rod still pinches under a body-uniform gain (each body's
+  net gain replaced by its circulation-weighted mean: pinch at 25-26 tu against 23-24), so the pinch is
+  strain thinning plus sub-threshold decay, not differential feeding along the body; that control still
+  changes fuel use (12x, mostly global groups). Sparing necks by smoothing the gain's saturation
+  (sigma 2-3) kills every body within 50 tu; smoothing the fuel in the growth term (sigma 6) runs away
+  to non-finite values; lowering the body threshold makes bodies decay. The same sub-threshold decay
+  bounds every body's edge and kills starved bodies, so no local change removes pinching alone.
+- *Groups not to rely on:* device0 groups for the numerical null (it leaves their native band on 2-5
+  cases; aggregate device0/eat 1.11 against 0.90-1.10: the pinch timing carries the dt error), global
+  groups for wrong geometry (by construction), and each device's groups for ignore-actions on programs
+  that act only at the other device.
+- *Reward* (`rewards.py`, K=2 from reward-calibration.json): the native 64-member reference earns 0.726
+  through the evaluation path; initial persistence (1.03) earns 0. PhySim's calibration rule gives K=1
+  for this suite; K=2 would need scales about 10x the calibration standard deviations.
+- *Credit-free validation:* `required_bundle` opens it as a `LabBundle` (both profiles); `public_prompt`
+  renders 4 ports and 4 channels; `LaboratoryTools.experiment` and `usage` run directly (admitted and
+  charged; a port-4 request is rejected without charge); two truths re-simulate bit for bit; initial
+  persistence reproduces checks.json through `evaluation.reference_demo`.
+
 ## Open questions
 
 - Whether to keep raw Python steppers or widen Blobkit's genome into a term list for field worlds
