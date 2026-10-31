@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from physim.blobround6_explore import ExperimentService, RequestError
 from physim.bundles import Bundle
+from physim.labbundle import open_bundle
 
 from . import evaluation as E
 from .artifact_store import MARKER, read_artifact_files
@@ -120,7 +121,8 @@ def required_bundle(config: R6ToolsConfig, *, profile="evaluation") -> Bundle:
         if source is None:
             raise ValueError("The taskset must select a bundle before constructing a laboratory")
         path = fetch_bundle(**source.model_dump(), profile=profile)
-    bundle = Bundle(path, profile=profile)
+    # A manifest that declares a lab world opens as a LabBundle (physim.labbundle).
+    bundle = open_bundle(path, profile=profile)
     bundle.check_runtime()
     if config.bundle is not None:
         config.bundle = bundle.root
