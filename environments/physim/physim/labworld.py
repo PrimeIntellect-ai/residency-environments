@@ -27,6 +27,11 @@ everything the runner and the agent contract need that the module does not say:
   is the white form bit for bit; a white level ``s`` per point at spacing ``dx0`` is the
   intensity ``s * dx0`` (``s * dx0^2`` for conserved). A field not listed keeps the
   per-point meaning above.
+- ``noise_bounds``: per field, an optional ``(lo, hi)`` range (either may be None) that the field is
+  projected onto right after its noise is added (bounded noise form). It acts only where a noise
+  increment would carry the field out of its physical range (for example a volume fraction above 1
+  under proportional noise) and only when the field's sd is > 0, so a run whose noise never leaves
+  the range, and every run without a declared bound, is unchanged bit for bit.
 - ``ports``: per field, the source gain (native field units per native time per unit
   of PhySim amplitude) and an optional clip applied after each injection.
 - ``dx``: world units per pixel; the Gaussian source width is in world units.
@@ -117,6 +122,7 @@ class LabWorld:
     derived: tuple[Derived, ...] = ()
     noise_corr: dict = field(default_factory=dict)
     noise_intensity: tuple[str, ...] = ()
+    noise_bounds: dict = field(default_factory=dict)
 
     def __post_init__(self):
         for f, (kind, sd) in self.noise.items():
@@ -131,6 +137,13 @@ class LabWorld:
         if len(set(intensity)) != len(intensity) or not set(intensity) <= set(self.noise):
             raise ValueError("noise_intensity must list distinct fields that have a declared noise")
         object.__setattr__(self, "noise_intensity", intensity)
+        for f, b in self.noise_bounds.items():
+            ok = f in self.noise and isinstance(b, (tuple, list)) and len(b) == 2
+            lo, hi = (b if ok else (None, None))
+            ok = ok and all(v is None or (not isinstance(v, bool) and np.isfinite(v)) for v in (lo, hi))
+            if not ok or (lo is not None and hi is not None and not lo < hi) or (lo is None and hi is None):
+                raise ValueError(f"noise bounds for {f!r} must name a field with a declared noise and be (lo, hi), lo < hi")
+        object.__setattr__(self, "noise_bounds", {f: tuple(b) for f, b in self.noise_bounds.items()})
         derived = tuple(self.derived)
         names = [d.name for d in derived]
         if len(set(names)) != len(names) or set(names) & set(self.fields):
@@ -170,6 +183,8 @@ class LabWorld:
             d.pop("noise_corr")
         if not self.noise_intensity:
             d.pop("noise_intensity")
+        if not self.noise_bounds:
+            d.pop("noise_bounds")
         if self.actuators is None:
             d.pop("actuators")
         if self.derived:
@@ -278,6 +293,8 @@ class LabStepper:
                         state[f] = state[f] + sd * np.sqrt(h) * 0.5 * div
                     else:
                         state[f] = state[f] + sd * np.sqrt(h) * self._smooth(div, ell, conserved=True)
+                    if f in w.noise_bounds:
+                        state[f] = np.clip(state[f], *w.noise_bounds[f])
                 continue
             xi = rng.standard_normal(state[f].shape)
             if sd > 0:
@@ -287,6 +304,8 @@ class LabStepper:
                     xi = self._smooth(xi, ell)
                 a = sd * np.sqrt(h)
                 state[f] = state[f] + (a * xi if kind == "additive" else a * xi * state[f])
+                if f in w.noise_bounds:
+                    state[f] = np.clip(state[f], *w.noise_bounds[f])
         return state
 
     def _bump(self, shape, y, x):
