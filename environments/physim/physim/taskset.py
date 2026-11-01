@@ -95,6 +95,12 @@ class R6TaskConfig(vf.TaskConfig):
     agent_image: str = AGENT_IMAGE
     coding_interface: Literal["shell", "ipython"] = "shell"
     setup_timeout: float = Field(900, gt=0, le=3600)
+    # Rollout limits. Lab worlds can be far costlier to simulate than Blobkit worlds, so these are
+    # configurable; None for the scoring timeout derives it from the suite and the predictor limits.
+    agent_timeout: float = Field(86400, gt=0)
+    finalize_timeout: float = Field(900, gt=0)
+    scoring_timeout: float | None = Field(None, gt=0)
+    agent_resources: vf.TaskResources = vf.TaskResources(cpu=4, memory=8)
     checkpoint_artifact: Path | None = None
 
 
@@ -127,6 +133,14 @@ def required_bundle(config: R6ToolsConfig, *, profile="evaluation") -> Bundle:
     if config.bundle is not None:
         config.bundle = bundle.root
     return bundle
+
+
+def scoring_timeout(config: "R6TaskConfig", bundle) -> float:
+    """Grading runs the predictor once per suite case, then scores; size the timeout to fit."""
+    if config.scoring_timeout is not None:
+        return config.scoring_timeout
+    cases = len(bundle.suite["cases"]) if bundle.suite is not None else 0
+    return max(7200.0, cases * (config.tools.predictor_limits.wall_seconds + 60.0) + 900.0)
 
 
 def public_roster(config: R6ToolsConfig):
@@ -687,8 +701,13 @@ class R6Taskset(vf.Taskset[R6Task, R6Config]):
                     image=config.agent_image,
                     workdir="/workspace",
                     network_allow=[],
-                    resources=vf.TaskResources(cpu=4, memory=8),
-                    timeout=vf.TaskTimeout(setup=config.setup_timeout, agent=86400, finalize=900, scoring=7200),
+                    resources=config.agent_resources,
+                    timeout=vf.TaskTimeout(
+                        setup=config.setup_timeout,
+                        agent=config.agent_timeout,
+                        finalize=config.finalize_timeout,
+                        scoring=scoring_timeout(config, bundle),
+                    ),
                 ),
                 config,
             )
