@@ -1,0 +1,14 @@
+{
+  "dataset_repo": "ydnysh/synthetic-workspace-gym",
+  "dataset_revision": "3ba83f647b96556be8c5084584a2d86e93225684",
+  "export_integrity_sha256": "128c3c984d91e7d46918e0f2f77cab4543943a25e11083bf18d0ad00dcf9f7f8",
+  "exporting_generator_revision": "3bd13bb949846e7b7393afe81727f1127e984475",
+  "source_manifests_sha256": {
+    "eval-d1-d4-paired-panel-48-v5.json": "cb1271ce51a9677b3be9da90c9585798a2134fbb769a4e70b0a1cb3b393609fa",
+    "eval-d5-family-calibration-40-v5.json": "4c34bfc894be1d1c883a4fb9a892de6b48a94b14f354ec9c564984801d607aef",
+    "rl-eval-v5.json": "56b857976dc30a405089bc5c1c90d8d8cd36be267f827c8c08b82be4c42790bc",
+    "rl-hard-v5.json": "fa152e4c73517c3c76bb01e6183c66f19e05842a357e0f877b427e12e6e8d87a",
+    "sft-easy-v5.json": "c604b98c302d8434369dc40f60071525a9bfebff23d747c1dc493844ff35763f",
+    "sft-validation-v5.json": "5f30a82295e61e678adf89d8806ba8e7967069b1ef62a1f33d0683e3fac54509"
+  }
+}

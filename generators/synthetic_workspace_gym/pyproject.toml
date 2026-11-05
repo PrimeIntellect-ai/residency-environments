@@ -1,0 +1,29 @@
+[project]
+name = "synthetic-workspace-gym-generators"
+version = "0.1.0"
+description = "Generation, provenance, and validation code for Synthetic Workspace Gym."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = ["huggingface-hub>=0.28,<2"]
+
+[project.scripts]
+swg-export-dataset = "swg_generators.export_dataset:main"
+swg-publish-dataset = "swg_generators.publish_dataset:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["swg_generators"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.1",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "I"]
