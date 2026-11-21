@@ -23,6 +23,7 @@ from pmpp_hard.config import (  # noqa: F401 (GATE_PERF re-export)
     GATE_PERF,
     PMPPHardConfig,
     PMPPHardTaskData,
+    PMPPHardTasksetConfig,
 )
 from pmpp_hard.paths import DataTree, Workspace
 from pmpp_hard.preflight import PreflightContext, run_preflight
@@ -89,15 +90,16 @@ class PMPPHardTask(vf.Task[PMPPHardTaskData, vf.State, PMPPHardConfig]):
         )
 
 
-class PMPPHardTaskset(vf.Taskset[PMPPHardTask, PMPPHardConfig]):
-    def __init__(self, config: PMPPHardConfig) -> None:
+class PMPPHardTaskset(vf.Taskset[PMPPHardTask, PMPPHardTasksetConfig]):
+    def __init__(self, config: PMPPHardTasksetConfig) -> None:
         super().__init__(config)
         self._tree = DataTree()
         self._lever = None
         self._bundle_hashes: dict[str, str] = {}
 
     def load(self) -> list[PMPPHardTask]:
-        rows, stats = pool.build_tasks(self.config, self._tree)
+        settings = self.config.task
+        rows, stats = pool.build_tasks(settings, self._tree)
         self._bundle_hashes = {
             r.task_id: pool.bundle_sha256(self._tree, r.task_id) for r in rows
         }
@@ -107,7 +109,7 @@ class PMPPHardTaskset(vf.Taskset[PMPPHardTask, PMPPHardConfig]):
         report = run_preflight(
             PreflightContext(
                 tree=self._tree,
-                config=self.config,
+                config=settings,
                 tasks=rows,
                 stats=stats,
                 pool_hash=pool_hash,
@@ -116,7 +118,7 @@ class PMPPHardTaskset(vf.Taskset[PMPPHardTask, PMPPHardConfig]):
         print(
             "\n".join(report.header_lines())
         )  # ALWAYS — even with preflight=false (A1/B6)
-        if self.config.preflight:
+        if settings.preflight:
             report.raise_if_failed()
         elif report.errors:
             print(
@@ -125,7 +127,7 @@ class PMPPHardTaskset(vf.Taskset[PMPPHardTask, PMPPHardConfig]):
         self._lever = report.lever
         tasks: list[PMPPHardTask] = []
         for row in rows:
-            task = PMPPHardTask(row, self.config)
+            task = PMPPHardTask(row, settings)
             task._tree = self._tree
             task._lever = self._lever
             task._bundle_hash = self._bundle_hashes.get(row.task_id)

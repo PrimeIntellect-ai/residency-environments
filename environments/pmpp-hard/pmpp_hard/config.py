@@ -35,7 +35,14 @@ class PMPPHardTaskData(vf.TaskData):
     perf_ratio_target: float | None = None
 
 
-class PMPPHardConfig(vf.TasksetConfig, vf.TaskConfig):
+class PMPPHardConfig(vf.TaskConfig):
+    """Every PMPP Hard setting, set under ``[env.taskset.task]``.
+
+    Pool selection and scoring share one settings object. Verifiers hands each
+    task the taskset's ``task`` subtree, including when an eval worker rebuilds
+    tasks in another process, so the taskset reads the same subtree.
+    """
+
     # Reject unknown settings so misspelled or retired options cannot be ignored.
     model_config = {"extra": "forbid"}
     manifest: Literal["pool_pipeline_pmpp_hard69.jsonl"] = RELEASE_MANIFEST
@@ -49,18 +56,22 @@ class PMPPHardConfig(vf.TasksetConfig, vf.TaskConfig):
     sanity_manifest: Literal["sanity_manifest_pmpp_hard69.json"] = (
         RELEASE_SANITY_MANIFEST
     )
-    # Optional per-task agent images override the harness runtime image. Modal
-    # deployments use registry references here; existing harness configs remain
-    # authoritative when these fields are unset.
+    # Optional per-task agent images override the harness runtime image. Modal and
+    # Prime deployments use registry references here; existing harness configs
+    # remain authoritative when these fields are unset.
     agent_image: str | None = None
     agent_images: dict[str, str] = {}
-    score_runtime_type: Literal["docker", "modal"] = "docker"
+    score_runtime_type: Literal["docker", "modal", "prime"] = "docker"
     score_gpu: str = "1"  # GPU count or device request for the scoring container
     # RTX-PRO-6000 is Modal's compute-capability 12.0 GPU and matches ``sm_120``.
     score_modal_gpu: str = "RTX-PRO-6000"
     score_modal_region: str | None = None
     score_modal_network_access: bool = False
     score_modal_creates_per_sec: float | None = 10.0
+    # Prime GPU spec ("TYPE" or "TYPE:COUNT"). RTX_PRO_6000 matches ``sm_120``; the
+    # platform reports the allocated card as RTX_PRO_6000B_96GB.
+    score_prime_gpu: str = "RTX_PRO_6000"
+    score_prime_disk: float = 50.0  # GB; Prime VM disks hold the whole scoring image
     score_image: str = "nvidia/cuda:12.8.1-devel-ubuntu22.04"
     score_cpu: float = 8.0
     score_memory: float = 32.0
@@ -113,6 +124,10 @@ class PMPPHardConfig(vf.TasksetConfig, vf.TaskConfig):
     kernelguard_ratio_floor: float = 0.05
     # Unlisted runtimes fall back to ``score_image``; an empty map uses it globally.
     score_images: dict[str, str] = DEFAULT_SCORE_IMAGES
+
+
+class PMPPHardTasksetConfig(vf.TasksetConfig):
+    task: PMPPHardConfig = PMPPHardConfig()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,11 +183,10 @@ class LeverVector:
             only_supported=False,
             arch=config.arch,
             score_runtime_type=config.score_runtime_type,
-            score_gpu=(
-                config.score_modal_gpu
-                if config.score_runtime_type == "modal"
-                else config.score_gpu
-            ),
+            score_gpu={
+                "modal": config.score_modal_gpu,
+                "prime": config.score_prime_gpu,
+            }.get(config.score_runtime_type, config.score_gpu),
             manifest=config.manifest,
             pool_hash=pool_hash,
             n_tasks=len(tasks),

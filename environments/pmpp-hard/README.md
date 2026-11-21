@@ -64,7 +64,7 @@ This produces:
 - `pmpp-triton:cu128`
 - `pmpp-cutlass:12.8.1`
 
-Docker must have NVIDIA Container Toolkit access to a compatible GPU. The images pre-cache the dependencies required to start the configured harness after network access is blocked. The published configs use local Docker images; remote providers require equivalent images in an accessible registry.
+Docker must have NVIDIA Container Toolkit access to a compatible GPU. The images pre-cache the dependencies required to start the configured harness after network access is blocked. `smoke.toml` and `full.toml` use local Docker images; remote providers require equivalent images in an accessible registry.
 
 Triton images must already contain working `torch` and `triton` imports. Agent setup and scoring probe these dependencies and fail immediately with an image-content error when they are missing; neither sandbox attempts package installation at runtime.
 
@@ -90,5 +90,7 @@ uv run eval @ configs/pmpp-hard/full.toml
 ```
 
 The smoke configuration selects `v2-pl-34-fused_csr_spmm_topk`. The full configuration enumerates all 69 release tasks and resolves each task to its CUDA, Triton, or CUTLASS image.
+
+Every PMPP Hard setting named in this README belongs under `[env.taskset.task]` (`--env.taskset.task.*` on the command line); only `id` stays under `[env.taskset]`. Unknown keys at either level are rejected.
 
 Local reference/input checks, stale-output controls, and saved-submission replay commands are documented in [`scripts/pmpp-hard/README.md`](../../scripts/pmpp-hard/README.md). These do not call a model or publish results.

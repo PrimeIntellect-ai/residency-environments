@@ -5,6 +5,8 @@ push = false
 
 [env.taskset]
 id = "pmpp-hard"
+
+[env.taskset.task]
 arch = "sm_120"
 include_ids = ["v2-pl-34-fused_csr_spmm_topk"]
 require_perf = true
@@ -24,12 +26,12 @@ source_policy = true
 triton_premise = true
 kernelguard_check = true
 
-[env.taskset.agent_images]
+[env.taskset.task.agent_images]
 cuda = "pmpp-cuda-agent:cu128"
 triton = "pmpp-triton:cu128"
 cutlass = "pmpp-cutlass:12.8.1"
 
-[env.taskset.score_images]
+[env.taskset.task.score_images]
 cuda = "pmpp-cuda-agent:cu128"
 triton = "pmpp-triton:cu128"
 cutlass = "pmpp-cutlass:12.8.1"
