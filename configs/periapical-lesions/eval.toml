@@ -1,0 +1,20 @@
+# Supply the policy with -m. Start with -n 1 -r 2 before a full evaluation.
+push = false
+
+[env.taskset]
+id = "periapical-lesions"
+split = "test"
+
+[env.agent]
+max_turns = 50
+
+# A coding agent that can view images: it crops and enhances the film with Python and looks at the results.
+# The bash harness cannot show image crops back to the model.
+[env.agent.harness]
+id = "claude_code"
+version = "2.1.280"
+# The sandbox has no network and the proxy strips provider web tools; removing these keeps every run offline by construction.
+disabled_tools = ["WebFetch", "WebSearch"]
+
+[env.agent.runtime]
+type = "prime"

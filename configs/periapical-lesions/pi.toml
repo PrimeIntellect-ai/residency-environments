@@ -1,0 +1,33 @@
+# Pi, the default harness of this taskset, shows the film to the model as an image. Supply the policy with -m:
+#   .venv/bin/vf-eval @ configs/periapical-lesions/pi.toml -m <model> -n 1 -r 2
+push = false
+
+[env.taskset]
+id = "periapical-lesions"
+split = "test"
+
+[env.agent]
+max_turns = 50
+
+[env.agent.harness]
+id = "pi"
+version = "0.84.1"
+
+[env.agent.runtime]
+type = "prime"
+
+# Rerun an attempt in a fresh sandbox when a provider call, the sandbox or the harness fails (never on reward).
+# Under load, the connection from the sandbox to the model proxy can drop while it sends the first request
+# with the film; Pi then stops without a model turn, which the run records as a HarnessError.
+# Each rule allows two retries per attempt for its error type; other errors are not retried.
+[[env.agent.retries.rules]]
+type = "ProviderError"
+max_retries = 2
+
+[[env.agent.retries.rules]]
+type = "SandboxError"
+max_retries = 2
+
+[[env.agent.retries.rules]]
+type = "HarnessError"
+max_retries = 2
