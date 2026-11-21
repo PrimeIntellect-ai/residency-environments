@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "kernelguard==0.3.2",
-  "verifiers>=0.3.0",
+  "verifiers>=0.3.1,<0.4",
 ]
 authors = [{ name = "Sinatras", email = "SinatrasC@users.noreply.github.com" }]
 license = { file = "pmpp_hard/LICENSE" }
@@ -18,7 +18,7 @@ Repository = "https://github.com/SinatrasC/pmpp-hard"
 Issues = "https://github.com/SinatrasC/pmpp-hard/issues"
 
 [project.optional-dependencies]
-modal = ["verifiers[modal]>=0.3.0"]
+modal = ["verifiers[modal]>=0.3.1,<0.4"]
 
 [build-system]
 requires = ["hatchling"]

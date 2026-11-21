@@ -14,6 +14,8 @@ import statistics
 import subprocess
 import uuid
 
+from verifiers.v1.utils.prime import ensure_prime_auth
+
 from pmpp_hard import benchmarks, grader_inputs, kernelguard_gate, markers, residency
 from pmpp_hard.config import DEFAULT_SCORE_IMAGES, PMPPHardConfig, PMPPHardTaskData
 from pmpp_hard.errors import ScoreInfraError
@@ -131,8 +133,8 @@ def score_image_is_pullable(image: str) -> bool:
     return "/" in repository or repository in _DOCKER_HUB_OFFICIAL
 
 
-def modal_image_is_registry_addressable(image: str) -> bool:
-    """Return whether Modal can resolve an image through a remote registry."""
+def image_is_registry_addressable(image: str) -> bool:
+    """Return whether a remote provider can resolve an image through a registry."""
     repository = image.split("@", 1)[0]
     host = repository.split("/", 1)[0].split(":", 1)[0].lower()
     return host not in {"localhost", "127.0.0.1", "::1"} and score_image_is_pullable(
@@ -177,7 +179,7 @@ async def ensure_modal_registry_image(image: str) -> None:
     """Resolve and build-cache a public registry image in the Verifiers Modal app."""
     if error := modal_prerequisite_error():
         raise ScoreInfraError(error)
-    if not modal_image_is_registry_addressable(image):
+    if not image_is_registry_addressable(image):
         raise ScoreInfraError(
             f"Modal image {image} is local-only; publish it to a public "
             "registry and configure the runtime with that reference"
@@ -203,9 +205,45 @@ async def ensure_modal_registry_image(image: str) -> None:
         _MODAL_IMAGES_READY.add(image)
 
 
+def prime_runtime_error(config: PMPPHardConfig, image: str) -> str | None:
+    """Return why Prime cannot score with this image, without exposing credentials.
+
+    Prime builds the VM image on the first sandbox that uses a registry reference,
+    so no separate image-preparation step is needed.
+    """
+    try:
+        ensure_prime_auth()
+    except SystemExit as error:
+        return f"Prime scoring requires credentials: {error}"
+    gpu_type = config.score_prime_gpu.split(":", 1)[0].upper()
+    if config.arch == "sm_120" and not gpu_type.startswith("RTX_PRO_6000"):
+        return (
+            f"arch={config.arch} requires score_prime_gpu=RTX_PRO_6000, got "
+            f"{config.score_prime_gpu}"
+        )
+    if not image_is_registry_addressable(image):
+        return (
+            f"Prime image {image} is local-only; build it on Prime with "
+            "scripts/pmpp-hard/push-prime-images.sh and configure that reference"
+        )
+    return None
+
+
 def score_runtime_config(config: PMPPHardConfig, image: str | None = None):
     """Build the selected isolated scoring-sandbox config."""
     image = image or config.score_image
+    if config.score_runtime_type == "prime":
+        from verifiers.v1.runtimes.prime import PrimeConfig
+
+        return PrimeConfig(
+            image=image,
+            gpu=config.score_prime_gpu,
+            cpu=config.score_cpu,
+            memory=config.score_memory,
+            disk=config.score_prime_disk,
+            allow=[],
+            block=["*"],
+        )
     if config.score_runtime_type == "modal":
         if error := modal_gpu_arch_error(config.arch, config.score_modal_gpu):
             raise ValueError(error)
@@ -237,12 +275,16 @@ async def ensure_score_image_ready(
 ) -> None:
     """Check scoring prerequisites before model generation without pulling images."""
     image = resolve_score_image(config, runtime_kind_of(task))
+    if config.score_runtime_type == "prime":
+        if error := prime_runtime_error(config, image):
+            raise ScoreInfraError(error)
+        return
     if config.score_runtime_type == "modal":
         if error := modal_prerequisite_error():
             raise ScoreInfraError(error)
         if error := modal_gpu_arch_error(config.arch, config.score_modal_gpu):
             raise ScoreInfraError(error)
-        if not modal_image_is_registry_addressable(image):
+        if not image_is_registry_addressable(image):
             raise ScoreInfraError(
                 f"Modal image {image} is local-only; publish it to a public "
                 "registry and configure the runtime with that reference"
@@ -289,6 +331,10 @@ async def ensure_score_image_available(
 ) -> None:
     """Prepare the scoring image inside the scoring phase."""
     image = resolve_score_image(config, runtime_kind_of(task))
+    if config.score_runtime_type == "prime":
+        if error := prime_runtime_error(config, image):
+            raise ScoreInfraError(error)
+        return
     if config.score_runtime_type == "modal":
         await ensure_modal_registry_image(image)
         return
@@ -565,6 +611,10 @@ async def grade_in_fresh_runtime(
         )
         try:
             await score_rt.start()
+            if config.score_runtime_type == "prime":
+                # Prime applies egress rules to a running VM, so block every
+                # destination before any submitted code reaches the sandbox.
+                await score_rt.prepare_execution([])
             last_exc = None
             break
         except Exception as e:  # noqa: BLE001

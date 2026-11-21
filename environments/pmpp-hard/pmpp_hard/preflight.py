@@ -22,9 +22,10 @@ from pmpp_hard.paths import REF_NAMES, DataTree
 from pmpp_hard.pool import PoolStats
 from pmpp_hard.provision import _DENY_PREFIXES, grader_files, perf_enabled
 from pmpp_hard.scoring import (
+    image_is_registry_addressable,
     modal_gpu_arch_error,
-    modal_image_is_registry_addressable,
     modal_prerequisite_error,
+    prime_runtime_error,
     resolve_score_image,
     runtime_kind_of,
     score_image_is_pullable,
@@ -740,6 +741,12 @@ def check_score_images(ctx: PreflightContext) -> list[Finding]:
     for task in ctx.tasks:
         kind = runtime_kind_of(task)
         images.setdefault(kind, resolve_score_image(ctx.config, kind))
+    if ctx.config.score_runtime_type == "prime":
+        errors = {prime_runtime_error(ctx.config, image) for image in images.values()}
+        return [
+            Finding("score_images", "ERROR", None, error)
+            for error in sorted(errors - {None})
+        ]
     if ctx.config.score_runtime_type == "modal":
         findings = []
         if error := modal_prerequisite_error():
@@ -749,7 +756,7 @@ def check_score_images(ctx: PreflightContext) -> list[Finding]:
         if findings:
             return findings
         for kind, image in sorted(images.items()):
-            if not modal_image_is_registry_addressable(image):
+            if not image_is_registry_addressable(image):
                 findings.append(
                     Finding(
                         "score_images",
