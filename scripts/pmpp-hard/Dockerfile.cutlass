@@ -25,6 +25,10 @@ COPY --from=cutlass-source /src/cutlass/include /opt/cutlass/include
 COPY --from=cutlass-source /src/cutlass/tools/util/include /opt/cutlass/tools/util/include
 
 RUN pip3 install --no-cache-dir "uv==${UV_VERSION}"
+# The Verifiers harness runs `pip install -U --user uv` before installing its
+# dependencies offline. Newer uv releases cannot read this uv's cache, so pin it.
+RUN echo "uv==${UV_VERSION}" > /etc/pip-constraints.txt
+ENV PIP_CONSTRAINT=/etc/pip-constraints.txt
 COPY scripts/pmpp-hard/harness-deps.py /tmp/harness-deps.py
 RUN uv sync --script /tmp/harness-deps.py --no-config \
     && UV_OFFLINE=true uv sync --script /tmp/harness-deps.py --no-config \
