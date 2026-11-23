@@ -1,0 +1,35 @@
+periapical-lesions
+Copyright 2026 Dylan Tirandaz
+
+The environment code, its evaluation config and its sandbox Dockerfile are
+licensed under the Apache License, Version 2.0. See LICENSE in this directory.
+These terms do not change the licences of other code or data.
+
+The full films and annotations are downloaded from the dataset at run time.
+The bundled periapical_lesions/pai-reference.jpg is a CC BY 4.0 adaptation of
+training images from the dataset credited below: twelve lesion crops were
+resized, outlined, captioned and arranged into a reference chart.
+
+Dependencies retain their own licences:
+- verifiers: MIT License
+- datasets and huggingface-hub: Apache License 2.0
+- numpy: BSD-3-Clause
+- scipy: BSD-style licence
+- Pillow, included in the sandbox image: HPND
+
+Dataset: tirandazdylan/periapical-lesions-pai
+https://huggingface.co/datasets/tirandazdylan/periapical-lesions-pai
+Source: Panoramic radiographs with periapical lesions, Mendeley Data, version 3.
+https://doi.org/10.17632/kx52tk2ddj.3
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0).
+https://creativecommons.org/licenses/by/4.0/
+Changes: augmented copies and near-duplicate films were left out; boxes were
+converted to COCO format; train, validation and test splits were added.
+
+Attribution:
+- Do HV. Panoramic radiographs with periapical lesions Dataset. Mendeley Data,
+  V3, 2024. https://doi.org/10.17632/kx52tk2ddj.3
+- Do HV, Vo TNN, Nguyen PT, Luong THL, Cu NG, Le HS. A dataset of apical
+  periodontitis lesions in panoramic radiographs for deep-learning-based
+  classification and detection. Data in Brief 54:110486, 2024.
+  https://doi.org/10.1016/j.dib.2024.110486
